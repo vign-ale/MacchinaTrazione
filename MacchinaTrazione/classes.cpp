@@ -19,43 +19,122 @@
 //   bool move(int8_t steps);
 // }
 
+// FRAME CLASS
+
 frame::frame()
 {
   _mode = 0;  // start in manual mode
   // _moving = false;
-  _stop = false;
+  // _stop = false;
   _step_active = 0;
   _step_delay = 100;
+  checkLimit();
 }
 
 void frame::up()
 {
-  if (_stop)
-  {
-    _dir = true;
-    xTaskNotifyGive(RTOS_stepControl_handle);
-  }
+  _dir = true;
+  xTaskNotifyGive(RTOS_stepControl_handle);
 }
 
 void frame::down()
 {
-  if (_stop)
+  _dir = false;
+  xTaskNotifyGive(RTOS_stepControl_handle);
+}
+
+void frame::checkLimit()
+{
+  for (uint8_t i = 0; i < 4; ++i)
   {
-    _dir = false;
-    xTaskNotifyGive(RTOS_stepControl_handle);
+    endstops[i].read();
+    if (endstops[i].isPressed())
+    {
+      stop(); //  endstop changed to pressed, stop frame
+    }
   }
+  switch (_step_active) // alow movement based on selected stepper
+  {
+    case 0: // both steppers active
+      {
+        if (endstops[0].isReleased() && endstops[1].isReleased())
+        {
+          _space_up = true;
+        }
+        else
+        {
+          _space_up = false;
+        }
+        if (endstops[2].isReleased() && endstops[3].isReleased())
+        {
+          _space_down = true;
+        }
+        else
+        {
+          _space_down = false;
+        }
+      }
+      break;
+    case 1: // A stepper active
+      {
+        if (endstops[0].isReleased())
+        {
+          _space_up = true;
+        }
+        else
+        {
+          _space_up = false;
+        }
+        if (endstops[2].isReleased())
+        {
+          _space_down = true;
+        }
+        else
+        {
+          _space_down = false;
+        }
+      }
+      break;
+    case 2: // B stepper active
+      {
+        if (endstops[1].isReleased())
+        {
+          _space_up = true;
+        }
+        else
+        {
+          _space_up = false;
+        }
+        if (endstops[3].isReleased())
+        {
+          _space_down = true;
+        }
+        else
+        {
+          _space_down = false;
+        }
+      }
+      break;
+  }  
 }
 
 void frame::stop()
 {
-  _stop = true;
+  xTaskNotifyGiveIndexed(RTOS_stepControl_handle, 1);
+  // _stop = true;
 }
 
-bool frame::setMode(uint8_t mode_new)
+// void frame::enable()
+// {
+//   _stop = false;
+// }
+
+bool frame::setMode(uint8_t mode_new) // TODO: notification to task
 {
   if (mode_new != _mode)
   {
     _mode = mode_new;
+    xTaskNotifyGive(RTOS_modeManager_handle);
     return true;
   }
   return false;
@@ -64,9 +143,10 @@ bool frame::setMode(uint8_t mode_new)
 void frame::setSteppers(uint8_t steppers)
 {
   _step_active = steppers;
+  checkLimit();
 }
 
-void frame::setDelay(uint8_t step_delay)
+void frame::setDelay(uint16_t step_delay)
 {
   _step_delay = step_delay;
 }
@@ -91,17 +171,35 @@ bool frame::getDir()
   return _dir;
 }
 
-bool frame::isStopped()
+bool frame::cgUp()
 {
-  return _stop;
+  return _space_up;
 }
 
+bool frame::cgDown()
+{
+  return _space_down;
+}
+
+// bool frame::isStopped()
+// {
+//   // TODO: understand if it is really necessary
+//   // semaphore is used to make sure that reading and writing to variable is not done simultaneously
+//   // xSemaphoreTake(RTOS_stop_semaphore, portMAX_DELAY);
+//   // bool temp = _stop;
+//   // xSemaphoreGive(RTOS_SPI_semaphore);
+//   // return temp;
+//   return _stop;
+// }
+
+
+// INPUT CLASS
 
 input::input(uint8_t pin, bool pressed)
 {
   _pin = pin;
   _state_pressed = pressed; // change based on HW
-  pinMode(_pin, INPUT);
+  pinMode(_pin, INPUT_PULLUP);
   read();
 }
 
