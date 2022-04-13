@@ -1,7 +1,5 @@
 #include "classes.h"
 
-#define ENDSTOP_PRESSED_STATE true
-
 // class frame
 // {
 // // private:
@@ -53,7 +51,7 @@ void frame::checkLimit()
       stop(); //  endstop changed to pressed, stop frame
     }
   }
-  switch (_step_active) // alow movement based on selected stepper
+  switch (_step_active) // allow movement based on selected stepper
   {
     case 0: // both steppers active
       {
@@ -115,7 +113,7 @@ void frame::checkLimit()
         }
       }
       break;
-  }  
+  }
 }
 
 void frame::stop()
@@ -134,7 +132,7 @@ bool frame::setMode(uint8_t mode_new) // TODO: notification to task
   if (mode_new != _mode)
   {
     _mode = mode_new;
-    xTaskNotifyGive(RTOS_modeManager_handle);
+    xQueueSend(RTOS_modeManager_queue, &mode_new, portMAX_DELAY);
     return true;
   }
   return false;
@@ -252,4 +250,27 @@ bool input::justPressed()
 bool input::justReleased()
 {
   return _justReleased;
+}
+
+
+// LED CLASS
+
+led::led(uint8_t pin)
+{
+  _pin = pin;
+  _state = false;
+  pinMode(_pin, OUTPUT);
+  off();
+}
+
+void led::on()
+{
+  _state = true;
+  digitalWrite(_pin, HIGH);
+}
+
+void led::off()
+{
+  _state = false;
+  digitalWrite(_pin, LOW);
 }
