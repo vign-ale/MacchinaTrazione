@@ -15,10 +15,10 @@
 #define CAL_TIME 5000  // millis time to press to start calibration
 
 #define SPEED_STEPS 3
-#define DELAY_1 50
-#define DELAY_2 200
-#define DELAY_3 500
-#define DELAY_4 1000
+#define DELAY_1 10
+#define DELAY_2 20
+#define DELAY_3 50
+#define DELAY_4 100
 
 // input configuration
 #define PIN_ENDSTOP_1 1
@@ -28,11 +28,11 @@
 #define PIN_MANUAL 5
 #define PIN_CONFIRM 6
 #define PIN_SPEED 7
-#define PIN_UP 8
-#define PIN_DOWN 9
-#define PIN_LED1 10
-#define PIN_LED2 11
-#define PIN_LED3 12
+#define PIN_UP 34
+#define PIN_DOWN 35
+#define PIN_LED1 9
+#define PIN_LED2 10
+#define PIN_LED3 11
 //input btn_manual;
 //input btn_confirm;
 uint8_t encoder_speed;
@@ -49,9 +49,9 @@ uint16_t millis_elapsed;
 
 
 // stepper configuration
-#define PIN_STEPA 10
-#define PIN_STEPB 11
-#define PIN_DIR 12 // do not need 2 direction pins as asymmetric movement is not planned
+#define PIN_STEPA 26
+#define PIN_STEPB 25
+#define PIN_DIR 27 // do not need 2 direction pins as asymmetric movement is not planned
 uint8_t pulse_length;
 
 frame mainframe;
@@ -71,10 +71,11 @@ void IRAM_ATTR endstop_trigger()
 
 
 void setup() {
+  Serial.begin(115200);
+  Serial.print("Booting...");
   RTOS_ledManager_queue = xQueueCreate(4, sizeof(uint8_t));
   xTaskCreate(ledManager, "Led manager", 3000, NULL, 2, &RTOS_ledManager_handle);
   ledMessage(LED_ERROR);
-  Serial.begin(9600);
   pinMode(PIN_STEPA, OUTPUT);
   pinMode(PIN_STEPB, OUTPUT);
   pinMode(PIN_DIR, OUTPUT);
@@ -101,6 +102,7 @@ void setup() {
   xTaskCreate(modeManager, "Mode manager", 3000, NULL, 3, &RTOS_modeManager_handle);
 
   // notify setup ended
+  Serial.println("  Hello!");
   ledMessage(LED_OK);
 }
 

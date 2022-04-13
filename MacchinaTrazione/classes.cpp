@@ -219,6 +219,7 @@ void input::read()
     if (_state == false)
     {
       _justPressed = true;
+      Serial.println("ON");
     }
     _state = true;
   }
@@ -227,6 +228,7 @@ void input::read()
     if (_state == true)
     {
       _justReleased = true;
+      Serial.println("OFF");
     }
     _state = false;
   }
