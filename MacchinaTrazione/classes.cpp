@@ -19,7 +19,7 @@
 
 // FRAME CLASS
 
-frame::frame()
+void frame::init()
 {
   _mode = 0;  // start in manual mode
   // _moving = false;
@@ -32,12 +32,19 @@ frame::frame()
 void frame::up()
 {
   _dir = true;
-  xTaskNotifyGive(RTOS_stepControl_handle);
+  uint8_t move_mode = MOVE_INDEF;
+  xQueueSend(RTOS_stepControl_queue, &move_mode, 0);
 }
 
 void frame::down()
 {
   _dir = false;
+  uint8_t move_mode = MOVE_INDEF;
+  xQueueSend(RTOS_stepControl_queue, &move_mode, 0);
+}
+
+void frame::stop()
+{
   xTaskNotifyGive(RTOS_stepControl_handle);
 }
 
@@ -115,17 +122,6 @@ void frame::checkLimit()
       break;
   }
 }
-
-void frame::stop()
-{
-  xTaskNotifyGiveIndexed(RTOS_stepControl_handle, 1);
-  // _stop = true;
-}
-
-// void frame::enable()
-// {
-//   _stop = false;
-// }
 
 bool frame::setMode(uint8_t mode_new) // TODO: notification to task
 {

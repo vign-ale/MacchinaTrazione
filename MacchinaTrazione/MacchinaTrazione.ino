@@ -1,44 +1,11 @@
 #include "classes.h"
 
-
-#define MODE_MANUAL 0
-#define MODE_CAL_UP 1
-#define MODE_CAL_DOWN 2
-
-#define LED_ERROR 0
-#define LED_OK 1
-#define LED_UP 2
-#define LED_DOWN 3
-#define LED_CAL_SELECT 4
-
-#define MANUAL_FREQ 50  // millis cooldown between measurements
-#define CAL_TIME 5000  // millis time to press to start calibration
-
-#define SPEED_STEPS 3
-#define DELAY_1 10
-#define DELAY_2 20
-#define DELAY_3 50
-#define DELAY_4 100
-
-// input configuration
-#define PIN_ENDSTOP_1 1
-#define PIN_ENDSTOP_2 2
-#define PIN_ENDSTOP_3 3
-#define PIN_ENDSTOP_4 4
-#define PIN_MANUAL 5
-#define PIN_CONFIRM 6
-#define PIN_SPEED 7
-#define PIN_UP 34
-#define PIN_DOWN 35
-#define PIN_LED1 9
-#define PIN_LED2 10
-#define PIN_LED3 11
 //input btn_manual;
 //input btn_confirm;
-uint8_t encoder_speed;
-//input endstops[4] = { input(PIN_ENDSTOP_1, true), input(PIN_ENDSTOP_2, true), input(PIN_ENDSTOP_3, true), input(PIN_ENDSTOP_4, true)};
-input endstops[4] = {{PIN_ENDSTOP_1, false,}, {PIN_ENDSTOP_2, false}, {PIN_ENDSTOP_3, false}, {PIN_ENDSTOP_4, false}};
-input btn_confirm(PIN_CONFIRM, false);
+uint16_t encoder_speed = 1000;
+// input endstops[4] = { input(PIN_ENDSTOP_1, true), input(PIN_ENDSTOP_2, true), input(PIN_ENDSTOP_3, true), input(PIN_ENDSTOP_4, true)};
+input endstops[4] = {{PIN_ENDSTOP_1, false}, {PIN_ENDSTOP_2, false}, {PIN_ENDSTOP_3, false}, {PIN_ENDSTOP_4, false}};
+// input btn_confirm(PIN_CONFIRM, false);
 input btn_up(PIN_UP, false);
 input btn_down(PIN_DOWN, false);
 led led1(PIN_LED1);
@@ -52,38 +19,42 @@ uint16_t millis_elapsed;
 #define PIN_STEPA 26
 #define PIN_STEPB 25
 #define PIN_DIR 27 // do not need 2 direction pins as asymmetric movement is not planned
-uint8_t pulse_length;
+uint8_t pulse_length = 10;
 
 frame mainframe;
 
 TaskHandle_t RTOS_stepControl_handle;
+QueueHandle_t RTOS_stepControl_queue;
+// this semaphore taken means red: stop the movement
+// if semaphore free movement can happen 
+//SemaphoreHandle_t RTOS_stepControl_semaphore;
 TaskHandle_t RTOS_modeManager_handle;
 QueueHandle_t RTOS_modeManager_queue;
 TaskHandle_t RTOS_ledManager_handle;
 QueueHandle_t RTOS_ledManager_queue;
-//SemaphoreHandle_t RTOS_stop_semaphore;
 
 
-void IRAM_ATTR endstop_trigger()
+// void IRAM_ATTR endstop_trigger()
+// {
+//   mainframe.checkLimit();
+// }
+
+
+void setup()
 {
-  mainframe.checkLimit();
-}
-
-
-void setup() {
   Serial.begin(115200);
-  Serial.print("Booting...");
+  Serial.println("Booting...");
   RTOS_ledManager_queue = xQueueCreate(4, sizeof(uint8_t));
   xTaskCreate(ledManager, "Led manager", 3000, NULL, 2, &RTOS_ledManager_handle);
   ledMessage(LED_ERROR);
   pinMode(PIN_STEPA, OUTPUT);
   pinMode(PIN_STEPB, OUTPUT);
   pinMode(PIN_DIR, OUTPUT);
-  pinMode(PIN_SPEED, INPUT);
-  attachInterrupt(PIN_ENDSTOP_1, endstop_trigger, CHANGE);
-  attachInterrupt(PIN_ENDSTOP_2, endstop_trigger, CHANGE);
-  attachInterrupt(PIN_ENDSTOP_3, endstop_trigger, CHANGE);
-  attachInterrupt(PIN_ENDSTOP_4, endstop_trigger, CHANGE);
+  // pinMode(PIN_SPEED, INPUT);
+  // attachInterrupt(PIN_ENDSTOP_1, endstop_trigger, CHANGE);
+  // attachInterrupt(PIN_ENDSTOP_2, endstop_trigger, CHANGE);
+  // attachInterrupt(PIN_ENDSTOP_3, endstop_trigger, CHANGE);
+  // attachInterrupt(PIN_ENDSTOP_4, endstop_trigger, CHANGE);
   // put your setup code here, to run once:
 
   // xTaskCreate(
@@ -94,15 +65,20 @@ void setup() {
   //  1,         // Task priority
   //  &time_display_update_handle      // Task handle
   //  );
-
-
+  //RTOS_stepControl_semaphore = xSemaphoreCreateBinary();
+  //xSemaphoreGive(RTOS_stepControl_semaphore);
   RTOS_modeManager_queue = xQueueCreate(4, sizeof(uint8_t));
-  //RTOS_stop_semaphore = xSemaphoreCreateMutex();
+  RTOS_stepControl_queue = xQueueCreate(4, sizeof(uint8_t));
+
   xTaskCreate(stepControl, "Step controller", 3000, NULL, 10, &RTOS_stepControl_handle);
   xTaskCreate(modeManager, "Mode manager", 3000, NULL, 3, &RTOS_modeManager_handle);
 
+  Serial.print("Mainframe initalization...");
+  mainframe.init();
+  Serial.println(" done!");
+
   // notify setup ended
-  Serial.println("  Hello!");
+  Serial.println("All done! Hello.");
   ledMessage(LED_OK);
 }
 
@@ -114,20 +90,23 @@ void loop() {}
 void ledMessage(uint8_t code)
 {
   xTaskNotifyGive(RTOS_ledManager_handle);  // clears any previous message
-  xQueueSend(RTOS_modeManager_queue, &code, 0);
+  xQueueSend(RTOS_ledManager_queue, &code, 0);
 }
 
 void stepControl(void * parameter)
 {
+  uint8_t move_mode;
   bool dir;
   uint8_t step_active; // 0 both, 1 A, 2 B
   uint16_t step_delay;
 
   for (;;)
   {
-    //Serial.println(uxTaskGetStackHighWaterMark( NULL ));
-    ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
-    ulTaskNotifyTakeIndexed(1, pdTRUE, 0);  // clear old stop notifications if present
+    // we are using a queue to allow for different moving modes in future
+    // aslo because multiple notification to task are NOT working (don't know why)
+    xQueueReceive(RTOS_stepControl_queue, &move_mode, portMAX_DELAY);
+    ulTaskNotifyTake(pdTRUE, 0);  // clear previous notifications
+
     // get movement variables
     dir = mainframe.getDir();
     step_active = mainframe.getSteppers();
@@ -146,76 +125,55 @@ void stepControl(void * parameter)
     }
 
     // move correct steppers if there is space to do so
+    // stopping will be handled by interrupt, we just want to now if we can start moving
     if (direction_allowed)
     {
-      switch (step_active)
+      switch (move_mode)
       {
-        case 0: // both steppers active
+        case MOVE_INDEF:
         {
-          // ulTaskNotifyTakeIndexed(1, pdTRUE, 0) returns 0 if there are no notifications
-          // so !ulTaskNotifyTakeIndexed(1, pdTRUE, 0) returns 1 if there are no notifications
-          while (!ulTaskNotifyTakeIndexed(1, pdTRUE, 0))  // do not wait if there is no notification
+          // ulTaskNotifyTake(pdTRUE, 0) returns notification value if there are notifications
+          // ulTaskNotifyTake(pdTRUE, 0) returns 0 if there are no notifications
+          // so !ulTaskNotifyTake(pdTRUE, 0) returns 1 if there are no notifications
+          while (!ulTaskNotifyTake(pdTRUE, 0))  // do not wait if there is no notification
           {
+            // we can move
             step_delay = mainframe.getDelay();  // this allows for changing speed without releasing movement button
-            // NOTE: digitalWrite funtion is not fast to execute, but the delay should be << compared to pulse_lenght
-            // this means there is a slight asymmetry and delay between the right and left steppers, but it should not be an issue
-            // TODO: check if it's really an issue or not
-            digitalWrite(PIN_STEPA, HIGH);
-            digitalWrite(PIN_STEPB, HIGH);
-            delayMicroseconds(pulse_length);
-            digitalWrite(PIN_STEPA, LOW);
-            digitalWrite(PIN_STEPB, LOW);
-            delayMicroseconds(step_delay);
-          }
-        }
-        case 1: // stepper A active
-        {
-          while (!ulTaskNotifyTakeIndexed(1, pdTRUE, 0))
-          {
-            step_delay = mainframe.getDelay();
-            digitalWrite(PIN_STEPA, HIGH);
-            delayMicroseconds(pulse_length);
-            digitalWrite(PIN_STEPA, LOW);
-            delayMicroseconds(step_delay);
-          }
-        }
-        case 2: // stepper B active
-        {
-          while (!ulTaskNotifyTakeIndexed(1, pdTRUE, 0))
-          {
-            step_delay = mainframe.getDelay();
-            digitalWrite(PIN_STEPB, HIGH);
-            delayMicroseconds(pulse_length);
-            digitalWrite(PIN_STEPB, LOW);
-            delayMicroseconds(step_delay);
+            switch (step_active)
+            {
+              case 0: // both steppers active
+              { 
+                // NOTE: digitalWrite funtion is not fast to execute, but the delay should be << compared to pulse_lenght
+                // this means there is a slight asymmetry and delay between the right and left steppers, but it should not be an issue
+                // TODO: check if it's really an issue or not
+                digitalWrite(PIN_STEPA, HIGH);
+                digitalWrite(PIN_STEPB, HIGH);
+                delayMicroseconds(pulse_length);
+                digitalWrite(PIN_STEPA, LOW);
+                digitalWrite(PIN_STEPB, LOW);
+                delayMicroseconds(step_delay);
+              }
+              case 1: // stepper A active
+              {
+                digitalWrite(PIN_STEPA, HIGH);
+                delayMicroseconds(pulse_length);
+                digitalWrite(PIN_STEPA, LOW);
+                delayMicroseconds(step_delay);
+              }
+              case 2: // stepper B active
+              {
+                digitalWrite(PIN_STEPB, HIGH);
+                delayMicroseconds(pulse_length);
+                digitalWrite(PIN_STEPB, LOW);
+                delayMicroseconds(step_delay);
+              }
+            }
           }
         }
       }
     }
   }
 }
-
-
-// void modeControl(void * parameter)
-// {
-//   uint8_t mode;
-//   for (;;)
-//   {
-//     // queue mode
-//     mode = mainframe.getMode();
-//       switch (mode)
-//       {
-//         case 0:
-//           {
-
-//           }
-//           break;
-
-//       }
-
-//   }
-// }
-
 
 void modeManager(void * parameter)
 {
@@ -231,6 +189,7 @@ void modeManager(void * parameter)
         {
           case MODE_CAL_UP:
             {
+              ledMessage(LED_CAL_UP);
               mainframe.setSteppers(0);
               mainframe.setDelay(DELAY_1);
               mainframe.up();
@@ -272,10 +231,12 @@ void modeManager(void * parameter)
               {
                 vTaskDelay(1);
               }
+              ledMessage(LED_OK);
             }
             break;
           case MODE_CAL_DOWN:
             {
+              ledMessage(LED_CAL_DOWN);
               mainframe.setSteppers(0);
               mainframe.setDelay(DELAY_1);
               mainframe.down();
@@ -317,6 +278,7 @@ void modeManager(void * parameter)
               {
                 vTaskDelay(1);
               }
+              ledMessage(LED_OK);
             }
             break;
           // automatic modes
@@ -332,7 +294,7 @@ void modeManager(void * parameter)
       btn_up.read();
       btn_down.read();
       // calculate speed
-      encoder_speed = map(analogRead(PIN_SPEED), 0, 4095, 1, SPEED_STEPS);
+      //encoder_speed = map(analogRead(PIN_SPEED), 0, 4095, 1, SPEED_STEPS);
       uint16_t delay_new;
       switch (encoder_speed)
       {
@@ -358,14 +320,16 @@ void modeManager(void * parameter)
         if (btn_up.justPressed() || btn_down.justPressed()) // at least one button has just been pressed
         {
           mainframe.stop();
+          ledMessage(LED_12);
           // pressing both buttons for 5s also starts the calibration routine
-          // this method is not really accurate but we it doesn't have to be
+          // this method is not really accurate but it doesn't have to be
           // this i because it takes > vTaskDelay time to execute all the code
           millis_elapsed = 0;
         }
         else  // buttons were already both pressed
         {
           millis_elapsed += MANUAL_FREQ;
+          // this selects and starts calibration routine
           if (millis_elapsed >= CAL_TIME)
           {
             ledMessage(LED_CAL_SELECT);
@@ -382,7 +346,6 @@ void modeManager(void * parameter)
               btn_up.read();
               btn_down.read();
             }
-            xTaskNotifyGive(RTOS_ledManager_handle);
             // now a button has been pressed
             if (btn_up.justPressed())
             {
@@ -398,27 +361,27 @@ void modeManager(void * parameter)
       }
       else
       {
-        if (btn_up.justPressed() && endstops[0].isReleased() && endstops[1].isReleased()) // check movement bounds
+        if (btn_up.justPressed())// && endstops[0].isReleased() && endstops[1].isReleased()) // check movement bounds
         {
           mainframe.stop();
           mainframe.up();
-          ledMessage(LED_UP);
+          ledMessage(LED_1);
         }
-        else if (btn_down.justPressed() && endstops[2].isReleased() && endstops[3].isReleased())
+        else if (btn_down.justPressed())// && endstops[2].isReleased() && endstops[3].isReleased())
         {
           mainframe.stop();
           mainframe.down();
-          ledMessage(LED_DOWN);
+          ledMessage(LED_2);
         }
         else if (btn_up.justReleased() || btn_down.justReleased())
         {
           mainframe.stop();
-          xTaskNotifyGive(RTOS_ledManager_handle);
+          ledMessage(LED_OFF);
         }  
       }
 
       // check if calibration must start
-      vTaskDelay(MANUAL_FREQ); // check every 50 ms
+      vTaskDelay(MANUAL_FREQ); // check every MANUAL_FREQ ms
     }
   }
 }
@@ -430,36 +393,46 @@ void ledManager(void * parameter)
   for (;;)
   {
     xQueueReceive(RTOS_ledManager_queue, &message, portMAX_DELAY);
+    ulTaskNotifyTake(pdTRUE, 0);  // clear previous notifications
+    Serial.println((String)"Led: "+message);
+
     switch (message)
     {
+      case LED_OFF:
+        {
+          led1.off();
+        }
+        break;
       case LED_ERROR:
         {
           led3.on();
           vTaskDelay(2000);
+          Serial.print("Waiting for notify...");
           ulTaskNotifyTake(pdTRUE, portMAX_DELAY);  // keep led on if code has an issue and doesn't unlock
-          led3.off();
+          Serial.println(" go!");
           led1.on();
           led2.on();
           vTaskDelay(2000);
           led1.off();
           led2.off();
+          led3.off();
           vTaskDelay(200);
         }
         break;
       case LED_OK:
         {
-          for (uint8_t i = 0; i < 3; ++i)
+          for (uint8_t i = 0; i < 5; ++i)
           {
             led1.on();
             led2.on();
-            vTaskDelay(200);
+            vTaskDelay(100);
             led1.off();
             led2.off();
-            vTaskDelay(200);
+            vTaskDelay(100);
           }
         }
         break;
-      case LED_UP:
+      case LED_1:
         {
           led1.on();
           while (!ulTaskNotifyTake(pdTRUE, 0))
@@ -470,13 +443,26 @@ void ledManager(void * parameter)
           vTaskDelay(200);
         }
         break;
-      case LED_DOWN:
+      case LED_2:
         {
           led2.on();
           while (!ulTaskNotifyTake(pdTRUE, 0))
           {
             vTaskDelay(10);
           }
+          led2.off();
+          vTaskDelay(200);
+        }
+        break;
+      case LED_12:
+        {
+          led1.on();
+          led2.on();
+          while (!ulTaskNotifyTake(pdTRUE, 0))
+          {
+            vTaskDelay(10);
+          }
+          led1.off();
           led2.off();
           vTaskDelay(200);
         }
@@ -493,6 +479,32 @@ void ledManager(void * parameter)
             led2.on();
           }
           led2.off();
+          vTaskDelay(200);
+        }
+        break;
+      case LED_CAL_UP:
+        {
+          led1.on();
+          led3.on();
+          while (!ulTaskNotifyTake(pdTRUE, 0))
+          {
+            vTaskDelay(10);
+          }
+          led1.off();
+          led3.off();
+          vTaskDelay(200);
+        }
+        break;
+      case LED_CAL_DOWN:
+        {
+          led2.on();
+          led3.on();
+          while (!ulTaskNotifyTake(pdTRUE, 0))
+          {
+            vTaskDelay(10);
+          }
+          led2.off();
+          led3.off();
           vTaskDelay(200);
         }
         break;
