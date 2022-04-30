@@ -2,7 +2,7 @@
 
 //input btn_manual;
 //input btn_confirm;
-uint16_t encoder_speed = 1000;
+uint8_t encoder_speed = 1;
 // input endstops[4] = { input(PIN_ENDSTOP_1, true), input(PIN_ENDSTOP_2, true), input(PIN_ENDSTOP_3, true), input(PIN_ENDSTOP_4, true)};
 input endstops[4] = {{PIN_ENDSTOP_1, false}, {PIN_ENDSTOP_2, false}, {PIN_ENDSTOP_3, false}, {PIN_ENDSTOP_4, false}};
 // input btn_confirm(PIN_CONFIRM, false);
@@ -68,7 +68,7 @@ void setup()
   pinMode(PIN_STEPA, OUTPUT);
   pinMode(PIN_STEPB, OUTPUT);
   pinMode(PIN_DIR, OUTPUT);
-  // pinMode(PIN_SPEED, INPUT);
+  // pinMode(PIN_SPEED, INPUT); not sure why not needed?
   // put your setup code here, to run once:
 
   // xTaskCreate(
@@ -264,7 +264,7 @@ void modeManager(void * parameter)
               {
                 vTaskDelay(10); // check every 10ms if limit is reached
               }
-              // now upper limit is reached, an endstop is pressed
+              // now lower limit is reached, an endstop is pressed
               // reach the other limit
               if (endstops[2].isPressed())
               {
@@ -314,7 +314,8 @@ void modeManager(void * parameter)
       btn_up.read();
       btn_down.read();
       // calculate speed
-      //encoder_speed = map(analogRead(PIN_SPEED), 0, 4095, 1, SPEED_STEPS);
+      uint16_t speed_raw = analogRead(PIN_SPEED);
+      encoder_speed = map(speed_raw, 0, 4095, 1, SPEED_STEPS);
       uint16_t delay_new;
       switch (encoder_speed)
       {
@@ -326,6 +327,9 @@ void modeManager(void * parameter)
           break;
         case 3:
           delay_new = DELAY_3;
+          break;
+        case 4:
+          delay_new = DELAY_4;
           break;
       }
       if (delay_new != mainframe.getDelay())

@@ -2,11 +2,13 @@
 // #include "freertos/FreeRTOS.h"
 // #include "freertos/task.h"
 #include <Arduino.h>
+#include "hx711.h"
 
 
 #define MODE_MANUAL 0
 #define MODE_CAL_UP 1
 #define MODE_CAL_DOWN 2
+#define MODE_WEIGHT 2
 
 #define MOVE_INDEF 0
 
@@ -23,20 +25,20 @@
 #define MANUAL_FREQ 50  // millis cooldown between measurements
 #define CAL_TIME 5000  // millis time to press to start calibration
 
-#define SPEED_STEPS 3
+#define SPEED_STEPS 4
 #define DELAY_1 10
 #define DELAY_2 20
 #define DELAY_3 50
 #define DELAY_4 100
 
 // input configuration
-#define PIN_ENDSTOP_1 34
-#define PIN_ENDSTOP_2 35
-#define PIN_ENDSTOP_3 36
-#define PIN_ENDSTOP_4 39
+#define PIN_ENDSTOP_1 19
+#define PIN_ENDSTOP_2 21
+#define PIN_ENDSTOP_3 22
+#define PIN_ENDSTOP_4 23
 //#define PIN_MANUAL 5
 //#define PIN_CONFIRM 6
-//#define PIN_SPEED 7
+#define PIN_SPEED 35
 #define PIN_UP 32
 #define PIN_DOWN 33
 #define PIN_LED1 14 // green top led
