@@ -193,7 +193,14 @@ input::input(uint8_t pin, bool pressed)
 {
   _pin = pin;
   _state_pressed = pressed; // change based on HW
-  pinMode(_pin, INPUT_PULLUP);
+  if (_state_pressed)
+  {
+    pinMode(_pin, INPUT_PULLDOWN);
+  }
+  else
+  {
+    pinMode(_pin, INPUT_PULLUP);
+  }
   read();
 }
 

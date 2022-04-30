@@ -112,3 +112,5 @@ extern TaskHandle_t RTOS_stepControl_handle;
 extern QueueHandle_t RTOS_stepControl_queue;
 extern TaskHandle_t RTOS_modeManager_handle;
 extern QueueHandle_t RTOS_modeManager_queue;
+extern TaskHandle_t RTOS_dataReader_handle;
+extern TaskHandle_t RTOS_limitCheck_handle;

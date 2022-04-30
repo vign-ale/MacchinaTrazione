@@ -32,12 +32,30 @@ TaskHandle_t RTOS_modeManager_handle;
 QueueHandle_t RTOS_modeManager_queue;
 TaskHandle_t RTOS_ledManager_handle;
 QueueHandle_t RTOS_ledManager_queue;
+TaskHandle_t RTOS_dataReader_handle;
+TaskHandle_t RTOS_limitCheck_handle;
 
+// here we use an ISR to activate a task that runs checkLimit
+// the task is not used elsewhere as it is better to make it run in other task
+// this way we are always sure the checkLimit ended before anything else happens in the task
+// in this case we come from an ISR so the task has really high priority and will be run ASAP
+void IRAM_ATTR endstop_trigger()
+{
+  // use xHigherPriorityTaskWoken to make sure context switch is as fast as possible
+  BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+  vTaskNotifyGiveFromISR(RTOS_limitCheck_handle, &xHigherPriorityTaskWoken);
+  portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+}
 
-// void IRAM_ATTR endstop_trigger()
-// {
-//   mainframe.checkLimit();
-// }
+void limitCheck(void * parameter)
+{
+  for (;;)
+  {
+    ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+    mainframe.checkLimit();
+  }
+
+}
 
 
 void setup()
@@ -51,16 +69,12 @@ void setup()
   pinMode(PIN_STEPB, OUTPUT);
   pinMode(PIN_DIR, OUTPUT);
   // pinMode(PIN_SPEED, INPUT);
-  // attachInterrupt(PIN_ENDSTOP_1, endstop_trigger, CHANGE);
-  // attachInterrupt(PIN_ENDSTOP_2, endstop_trigger, CHANGE);
-  // attachInterrupt(PIN_ENDSTOP_3, endstop_trigger, CHANGE);
-  // attachInterrupt(PIN_ENDSTOP_4, endstop_trigger, CHANGE);
   // put your setup code here, to run once:
 
   // xTaskCreate(
   //  time_display_update,  // Function that should be called
   //  "Time display update",   // Name of the task (for debugging)
-  //  1000,     // Stack size (bytes)
+  //   1000,     // Stack size (bytes)
   //  NULL,     // Parameter to pass
   //  1,         // Task priority
   //  &time_display_update_handle      // Task handle
@@ -72,10 +86,16 @@ void setup()
 
   xTaskCreate(stepControl, "Step controller", 3000, NULL, 10, &RTOS_stepControl_handle);
   xTaskCreate(modeManager, "Mode manager", 3000, NULL, 3, &RTOS_modeManager_handle);
+  xTaskCreate(limitCheck, "ISR limitCheck", 1000, NULL, 9, &RTOS_limitCheck_handle);
 
   Serial.print("Mainframe initalization...");
   mainframe.init();
   Serial.println(" done!");
+
+  attachInterrupt(PIN_ENDSTOP_1, endstop_trigger, CHANGE);
+  attachInterrupt(PIN_ENDSTOP_2, endstop_trigger, CHANGE);
+  attachInterrupt(PIN_ENDSTOP_3, endstop_trigger, CHANGE);
+  attachInterrupt(PIN_ENDSTOP_4, endstop_trigger, CHANGE);
 
   // notify setup ended
   Serial.println("All done! Hello.");
@@ -386,7 +406,6 @@ void modeManager(void * parameter)
   }
 }
 
-
 void ledManager(void * parameter)
 {
   uint8_t message;
@@ -510,4 +529,9 @@ void ledManager(void * parameter)
         break;
     }
   }
+}
+
+void dataReader(void * parameter)
+{
+
 }
