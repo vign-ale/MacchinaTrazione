@@ -2,13 +2,17 @@
 // #include "freertos/FreeRTOS.h"
 // #include "freertos/task.h"
 #include <Arduino.h>
-#include "hx711.h"
+#include <esp_task_wdt.h>
+#include "HX711.h"
 
+
+#define MAX_CMD_LENGTH 9  // max message length
 
 #define MODE_MANUAL 0
 #define MODE_CAL_UP 1
 #define MODE_CAL_DOWN 2
-#define MODE_WEIGHT 2
+#define MODE_WEIGHT 3
+#define MODE_LENGTH 4
 
 #define MOVE_INDEF 0
 
@@ -26,10 +30,10 @@
 #define CAL_TIME 5000  // millis time to press to start calibration
 
 #define SPEED_STEPS 4
-#define DELAY_1 10
-#define DELAY_2 20
-#define DELAY_3 50
-#define DELAY_4 100
+#define DELAY_1 20
+#define DELAY_2 50
+#define DELAY_3 100
+#define DELAY_4 200
 
 // input configuration
 #define PIN_ENDSTOP_1 19
@@ -66,6 +70,7 @@ class frame
     bool setMode(uint8_t mode_new);
     void setSteppers(uint8_t steppers);
     void setDelay(uint16_t delay);
+    void setDelayInt(uint8_t delay_int);
 
     uint8_t getMode();
     uint8_t getSteppers();

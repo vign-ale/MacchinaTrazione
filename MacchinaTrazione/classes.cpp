@@ -143,6 +143,31 @@ void frame::setSteppers(uint8_t steppers)
 void frame::setDelay(uint16_t step_delay)
 {
   _step_delay = step_delay;
+  Serial.println((String)"Delay stepper: "+step_delay);
+}
+
+void frame::setDelayInt(uint8_t delay_int)
+{
+  uint16_t delay_new;
+  switch (delay_int)
+  {
+    case 1:
+      delay_new = DELAY_1;
+      break;
+    case 2:
+      delay_new = DELAY_2;
+      break;
+    case 3:
+      delay_new = DELAY_3;
+      break;
+    case 4:
+      delay_new = DELAY_4;
+      break;
+  }
+  if (delay_new != _step_delay)
+  {
+    setDelay(delay_new);
+  }
 }
 
 uint8_t frame::getMode()
