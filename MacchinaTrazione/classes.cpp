@@ -155,7 +155,7 @@ void frame::setDelay(uint16_t step_delay)
   if (step_delay != _step_delay)
   {
     _step_delay = step_delay;
-  Serial.println((String)"Delay stepper: "+_step_delay);
+    Serial.println((String)"Delay stepper: "+_step_delay);
   }
 }
 
@@ -165,7 +165,7 @@ void frame::setSpeed(float speed)
   float steps_second = speed * steps_per_mm / 60;  // conversion to s from min
   float delay_micros = 1000000 / steps_second;  // micros in s / steps each second
   delay_micros = round(delay_micros - pulse_length); // additional delay from pulse_length removed
-  
+
   // if delay is < pulse_length we would be for sure too fast
   if (delay_micros < pulse_length)
   {
@@ -274,7 +274,7 @@ void input::read()
     if (_state == false)
     {
       _justPressed = true;
-      Serial.println("ON");
+      // Serial.println("ON");
     }
     _state = true;
   }
@@ -283,7 +283,7 @@ void input::read()
     if (_state == true)
     {
       _justReleased = true;
-      Serial.println("OFF");
+      // Serial.println("OFF");
     }
     _state = false;
   }

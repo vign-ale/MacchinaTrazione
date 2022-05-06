@@ -30,11 +30,11 @@
 #define CAL_TIME 5000  // millis time to press to start calibration
 
 #define SPEED_STEPS 4
-#define DELAY_MIN 100
-#define SPEED_1 10
-#define SPEED_2 25
-#define SPEED_3 100
-#define SPEED_4 500
+#define DELAY_MIN 1000
+#define SPEED_1 2
+#define SPEED_2 10
+#define SPEED_3 20
+#define SPEED_4 55
 
 // input configuration
 #define PIN_ENDSTOP_1 19
