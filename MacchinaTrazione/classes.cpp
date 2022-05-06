@@ -38,9 +38,11 @@ void frame::up()
 
 void frame::down()
 {
+  Serial.println("Before queue");
   _dir = false;
   uint8_t move_mode = MOVE_INDEF;
   xQueueSend(RTOS_stepControl_queue, &move_mode, 0);
+  Serial.println("After queue");
 }
 
 void frame::stop()
@@ -53,10 +55,10 @@ void frame::checkLimit()
   for (uint8_t i = 0; i < 4; ++i)
   {
     endstops[i].read();
-    if (endstops[i].isPressed())
-    {
-      stop(); //  endstop changed to pressed, stop frame
-    }
+    // if (endstops[i].isPressed())
+    // {
+    //   stop(); //  endstop changed to pressed, stop frame
+    // }
   }
   switch (_step_active) // allow movement based on selected stepper
   {
@@ -121,6 +123,10 @@ void frame::checkLimit()
       }
       break;
   }
+  if ((_dir && _space_up == false) || (!_dir && _space_down == false))
+  {
+    stop();
+  }
 }
 
 bool frame::setMode(uint8_t mode_new) // TODO: notification to task
@@ -142,32 +148,53 @@ void frame::setSteppers(uint8_t steppers)
 
 void frame::setDelay(uint16_t step_delay)
 {
-  _step_delay = step_delay;
-  Serial.println((String)"Delay stepper: "+step_delay);
+  if (step_delay < DELAY_MIN)
+  {
+    step_delay = DELAY_MIN;   
+  }
+  if (step_delay != _step_delay)
+  {
+    _step_delay = step_delay;
+  Serial.println((String)"Delay stepper: "+_step_delay);
+  }
 }
 
-void frame::setDelayInt(uint8_t delay_int)
+void frame::setSpeed(float speed)
 {
-  uint16_t delay_new;
-  switch (delay_int)
+  // inpuut speed is in mm/min
+  float steps_second = speed * steps_per_mm / 60;  // conversion to s from min
+  float delay_micros = 1000000 / steps_second;  // micros in s / steps each second
+  delay_micros = round(delay_micros - pulse_length); // additional delay from pulse_length removed
+  
+  // if delay is < pulse_length we would be for sure too fast
+  if (delay_micros < pulse_length)
+  {
+    delay_micros = pulse_length;
+  }
+  setDelay(delay_micros);
+}
+
+void frame::setSpeedInt(uint8_t speed_int)
+{
+  float speed_new;
+  switch (speed_int)
   {
     case 1:
-      delay_new = DELAY_1;
+      speed_new = SPEED_1;
       break;
     case 2:
-      delay_new = DELAY_2;
+      speed_new = SPEED_2;
       break;
     case 3:
-      delay_new = DELAY_3;
+      speed_new = SPEED_3;
       break;
     case 4:
-      delay_new = DELAY_4;
+      speed_new = SPEED_4;
       break;
+    default:
+      speed_new = SPEED_1;
   }
-  if (delay_new != _step_delay)
-  {
-    setDelay(delay_new);
-  }
+  setSpeed(speed_new);
 }
 
 uint8_t frame::getMode()

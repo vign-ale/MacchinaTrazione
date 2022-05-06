@@ -3,6 +3,7 @@
 //input btn_manual;
 //input btn_confirm;
 uint8_t encoder_speed = 1;
+bool speed_read_encoder = true;
 // input endstops[4] = { input(PIN_ENDSTOP_1, true), input(PIN_ENDSTOP_2, true), input(PIN_ENDSTOP_3, true), input(PIN_ENDSTOP_4, true)};
 input endstops[4] = {{PIN_ENDSTOP_1, false}, {PIN_ENDSTOP_2, false}, {PIN_ENDSTOP_3, false}, {PIN_ENDSTOP_4, false}};
 // input btn_confirm(PIN_CONFIRM, false);
@@ -14,7 +15,7 @@ led led3(PIN_LED3);
 
 #define PIN_LOADCELL_DOUT 15
 #define PIN_LOADCELL_SCK 2
-const uint16_t LOADCELL_DIVIDER = 5895655;
+const long LOADCELL_DIVIDER = 5895655;
 HX711 loadcell;
 
 uint16_t millis_elapsed;
@@ -24,6 +25,7 @@ uint16_t millis_elapsed;
 #define PIN_STEPB 25
 #define PIN_DIR 27 // do not need 2 direction pins as asymmetric movement is not planned
 uint8_t pulse_length = 10;
+float steps_per_mm = 200 * 1 * 26.85 / 5; // Steps per rev * Microstepping * Gear reduction ratio / Pitch
 
 frame mainframe;
 
@@ -40,7 +42,6 @@ QueueHandle_t RTOS_ledManager_queue;
 TaskHandle_t RTOS_dataReader_handle;
 TaskHandle_t RTOS_limitCheck_handle;
 TaskHandle_t RTOS_serialComm_handle;
-TaskHandle_t RTOS_idleTask_handle;
 
 // here we use an ISR to activate a task that runs checkLimit
 // the task is not used elsewhere as it is better to make it run in other task
@@ -59,6 +60,7 @@ void limitCheck(void * parameter)
   for (;;)
   {
     ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+    Serial.println("ISR exec");
     mainframe.checkLimit();
   }
 
@@ -86,16 +88,14 @@ void setup()
   //  1,         // Task priority
   //  &time_display_update_handle      // Task handle
   //  );
-  //RTOS_stepControl_semaphore = xSemaphoreCreateBinary();
-  //xSemaphoreGive(RTOS_stepControl_semaphore);
+
   RTOS_modeManager_queue = xQueueCreate(4, sizeof(uint8_t));
   RTOS_stepControl_queue = xQueueCreate(4, sizeof(uint8_t));
 
   xTaskCreate(stepControl, "Step controller", 3000, NULL, 10, &RTOS_stepControl_handle);
-  xTaskCreate(modeManager, "Mode manager", 3000, NULL, 3, &RTOS_modeManager_handle);
-  xTaskCreate(limitCheck, "ISR limitCheck", 1000, NULL, 9, &RTOS_limitCheck_handle);
-  xTaskCreate(serialComm, "Serial communication", 2000, NULL, 9, &RTOS_serialComm_handle);
-  RTOS_idleTask_handle = xTaskGetIdleTaskHandle();
+  xTaskCreate(modeManager, "Mode manager", 4000, NULL, 9, &RTOS_modeManager_handle);
+  xTaskCreate(limitCheck, "ISR limitCheck", 1000, NULL, 7, &RTOS_limitCheck_handle);
+  xTaskCreate(serialComm, "Serial communication", 3000, NULL, 8, &RTOS_serialComm_handle);
 
   Serial.print("Mainframe initalization...");
   mainframe.init();
@@ -114,7 +114,10 @@ void setup()
 
 // loop has idle task hook, it runs when nothing else is going on
 // left empty to allow resource cleanup
-void loop() {}
+void loop()
+{
+  vTaskDelay(100);
+}
 
 void ledcmd(uint8_t code)
 {
@@ -128,7 +131,7 @@ void stepControl(void * parameter)
   bool dir;
   uint8_t step_active; // 0 both, 1 A, 2 B
   uint16_t step_delay;
-
+  TaskHandle_t RTOS_idleTask_handle;
   for (;;)
   {
     // we are using a queue to allow for different moving modes in future
@@ -138,7 +141,16 @@ void stepControl(void * parameter)
 
     // this function can run for a very long time
     // unsubscribe TWDT from idle task to prevent crash
-    esp_task_wdt_delete(RTOS_idleTask_handle);
+    RTOS_idleTask_handle = xTaskGetIdleTaskHandle();
+    esp_err_t state = esp_task_wdt_status(RTOS_idleTask_handle);
+    //Serial.println(RTOS_idleTask_handle);
+    Serial.println((String)"Stato iniziale: "+esp_err_to_name(state));
+
+    //esp_task_wdt_delete(RTOS_idleTask_handle);
+
+    state = esp_task_wdt_status(RTOS_idleTask_handle);
+    Serial.println((String)"Stato movimento: "+esp_err_to_name(state));
+
 
     // get movement variables
     dir = mainframe.getDir();
@@ -201,14 +213,16 @@ void stepControl(void * parameter)
                 delayMicroseconds(step_delay);
               }
             }
-            esp_task_wdt_reset();
           }
         }
       }
     }
 
     // reactivate TWTD for idle task
-    esp_task_wdt_add(RTOS_idleTask_handle);
+    vTaskDelay(1);
+    //esp_task_wdt_add(RTOS_idleTask_handle);
+    state = esp_task_wdt_status(RTOS_idleTask_handle);
+    Serial.println((String)"Stato finale: "+esp_err_to_name(state));
   }
 }
 
@@ -217,6 +231,7 @@ void modeManager(void * parameter)
   uint8_t mode;
   for (;;)
   {
+    Serial.print("U");
     if (xQueueReceive(RTOS_modeManager_queue, &mode, 0) == pdTRUE)  // pdTRUE means there is a mode in queue
     {
       if (mode != MODE_MANUAL)  // if mode is manual skip, next loop queue is clear and enter manual mode
@@ -228,7 +243,7 @@ void modeManager(void * parameter)
             {
               ledcmd(LED_CAL_UP);
               mainframe.setSteppers(0);
-              mainframe.setDelay(DELAY_1);
+              mainframe.setDelay(DELAY_MIN);  // max speed
               mainframe.up();
               while (mainframe.cgUp())
               {
@@ -253,7 +268,7 @@ void modeManager(void * parameter)
               }
               // now both sides have been pressed
               // slow down, reverse and level slowly
-              mainframe.setDelay(DELAY_3);
+              mainframe.setSpeed(50);
               mainframe.setSteppers(1);
               mainframe.down();
               while (!mainframe.cgUp())
@@ -275,7 +290,7 @@ void modeManager(void * parameter)
             {
               ledcmd(LED_CAL_DOWN);
               mainframe.setSteppers(0);
-              mainframe.setDelay(DELAY_1);
+              mainframe.setDelay(DELAY_MIN);  // max speed
               mainframe.down();
               while (mainframe.cgDown())
               {
@@ -300,7 +315,7 @@ void modeManager(void * parameter)
               }
               // now both sides have been pressed
               // slow down, reverse and level slowly
-              mainframe.setDelay(DELAY_3);
+              mainframe.setSpeed(50);
               mainframe.setSteppers(1);
               mainframe.up();
               while (!mainframe.cgDown())
@@ -323,19 +338,22 @@ void modeManager(void * parameter)
         }
         mainframe.setMode(MODE_MANUAL); // always set manual mode after executing automatic mode test
       }
-      
     }
     else  // pdFALSE, there is no mode in queue so we are in manual mode
     {
       // read buttons
       btn_up.read();
       btn_down.read();
-      // calculate speed
-      uint16_t speed_raw = analogRead(PIN_SPEED);
-      encoder_speed = map(speed_raw, 0, 4095, 1, SPEED_STEPS);
-      uint16_t delay_new;
-      mainframe.setDelayInt(encoder_speed);
 
+      // calculate speed
+      if (speed_read_encoder)
+      {
+        uint16_t speed_raw = analogRead(PIN_SPEED);
+        encoder_speed = map(speed_raw, 0, 4095, 1, SPEED_STEPS);
+        mainframe.setSpeedInt(encoder_speed);
+
+      }
+      
       // select movement
       if (btn_up.isPressed() && btn_down.isPressed()) // should not press both, failsafe stops and starts calibration cooldown
       {
@@ -383,6 +401,7 @@ void modeManager(void * parameter)
       }
       else
       {
+          //Serial.print("0");
         if (btn_up.justPressed())// && endstops[0].isReleased() && endstops[1].isReleased()) // check movement bounds
         {
           mainframe.stop();
@@ -391,12 +410,17 @@ void modeManager(void * parameter)
         }
         else if (btn_down.justPressed())// && endstops[2].isReleased() && endstops[3].isReleased())
         {
+          Serial.print("2");
           mainframe.stop();
+          Serial.print("3");
           mainframe.down();
+          Serial.print("4");
           ledcmd(LED_2);
+          Serial.print("5");
         }
         else if (btn_up.justReleased() || btn_down.justReleased())
         {
+          Serial.print("R");
           mainframe.stop();
           ledcmd(LED_OFF);
         }  
@@ -415,7 +439,7 @@ void ledManager(void * parameter)
   {
     xQueueReceive(RTOS_ledManager_queue, &cmd, portMAX_DELAY);
     ulTaskNotifyTake(pdTRUE, 0);  // clear previous notifications
-    Serial.println((String)"Led: "+cmd);
+    //Serial.println((String)"Led: "+cmd);
 
     switch (cmd)
     {
@@ -436,7 +460,6 @@ void ledManager(void * parameter)
           led1.off();
           led2.off();
           led3.off();
-          vTaskDelay(200);
         }
         break;
       case LED_OK:
@@ -460,7 +483,6 @@ void ledManager(void * parameter)
             vTaskDelay(10);
           }
           led1.off();
-          vTaskDelay(200);
         }
         break;
       case LED_2:
@@ -471,7 +493,6 @@ void ledManager(void * parameter)
             vTaskDelay(10);
           }
           led2.off();
-          vTaskDelay(200);
         }
         break;
       case LED_12:
@@ -484,7 +505,6 @@ void ledManager(void * parameter)
           }
           led1.off();
           led2.off();
-          vTaskDelay(200);
         }
         break;
       case LED_CAL_SELECT:
@@ -499,7 +519,6 @@ void ledManager(void * parameter)
             led2.on();
           }
           led2.off();
-          vTaskDelay(200);
         }
         break;
       case LED_CAL_UP:
@@ -512,7 +531,6 @@ void ledManager(void * parameter)
           }
           led1.off();
           led3.off();
-          vTaskDelay(200);
         }
         break;
       case LED_CAL_DOWN:
@@ -525,10 +543,10 @@ void ledManager(void * parameter)
           }
           led2.off();
           led3.off();
-          vTaskDelay(200);
         }
         break;
     }
+    vTaskDelay(50); // min 50ms between messages
   }
 }
 
@@ -551,8 +569,11 @@ void serialComm(void * parameter)
 
   for(;;)
   {
-    vTaskDelayUntil( &xLastWakeTime, xFrequency);
-    xLastWakeTime = xTaskGetTickCount();
+    // Serial.println(" ");
+    // Serial.println((String)"Wait start: "+millis());
+    vTaskDelayUntil(&xLastWakeTime, xFrequency);
+    // Serial.println(" ");
+    // Serial.println((String)"Wait end: "+millis());
 
     // receive data
     while (Serial.available() > 0)
@@ -593,45 +614,47 @@ void serialComm(void * parameter)
               }
             }
             break;
-          case 'S': // setting has been sent
+          case 'D': // delay setting has been sent
             {
-              Serial.println("S case");
-              // remove S char
-              for (uint8_t i = 0; i < MAX_CMD_LENGTH - 1; ++i)
+              cmd_int = cmdtoi(cmd);
+              // delay 0 enables the encoder speed reader
+              if (cmd_int == 0)
               {
-                cmd[i] = cmd[i+1];
+                speed_read_encoder = true;
               }
-
-              switch (cmd[0]) // second char is setting type
+              else
               {
-                case 'D':
-                  {
-                    Serial.println("D case");
-                    cmd_int = cmdtoi(cmd);
-                    // DELAY_1 > 10 for sure
-                    // this allows to use predefined delays and custom delay in command
-                    if (cmd_int > DELAY_1)
-                    {
-                      mainframe.setDelay(cmd_int);
-                    }
-                    else
-                    {
-                      mainframe.setDelayInt(cmd_int);
-                    }
-                  }
-                  break;
-              // TODO config
+                speed_read_encoder = false;
+                mainframe.setDelay(cmd_int);
               }
             }
             break;
+          case 'S': // speed setting in mm/min has been sent
+            {
+              cmd_int = cmdtoi(cmd);
+              // speed 0 enables the encoder speed reader
+              if (cmd_int == 0)
+              {
+                speed_read_encoder = true;
+              }
+              else
+              {
+                speed_read_encoder = false;
+                mainframe.setSpeed(cmd_int);
+              }
+              
+              // TODO config
+              
+            }
+            break;
         }
-        Serial.println((String)"Received command: "+cmd);
-        Serial.println((String)"Command meaning: "+cmd_int);
+        //Serial.println((String)"Received command: "+cmd);
+        //Serial.println((String)"Command meaning: "+cmd_int);
+
         // reset for the next command
         cmd_pos = 0;
       }
     }
-
     // TODO: transimt data
   }
 }

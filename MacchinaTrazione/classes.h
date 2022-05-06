@@ -26,14 +26,15 @@
 #define LED_CAL_UP 7
 #define LED_CAL_DOWN 8
 
-#define MANUAL_FREQ 50  // millis cooldown between measurements
+#define MANUAL_FREQ 500  // millis cooldown between measurements
 #define CAL_TIME 5000  // millis time to press to start calibration
 
 #define SPEED_STEPS 4
-#define DELAY_1 20
-#define DELAY_2 50
-#define DELAY_3 100
-#define DELAY_4 200
+#define DELAY_MIN 100
+#define SPEED_1 10
+#define SPEED_2 25
+#define SPEED_3 100
+#define SPEED_4 500
 
 // input configuration
 #define PIN_ENDSTOP_1 19
@@ -70,7 +71,8 @@ class frame
     bool setMode(uint8_t mode_new);
     void setSteppers(uint8_t steppers);
     void setDelay(uint16_t delay);
-    void setDelayInt(uint8_t delay_int);
+    void setSpeed(float speed);
+    void setSpeedInt(uint8_t speed_int);
 
     uint8_t getMode();
     uint8_t getSteppers();
@@ -114,6 +116,8 @@ class led
 };
 
 extern input endstops[];
+extern uint8_t pulse_length;
+extern float steps_per_mm;
 
 extern TaskHandle_t RTOS_stepControl_handle;
 extern QueueHandle_t RTOS_stepControl_queue;
