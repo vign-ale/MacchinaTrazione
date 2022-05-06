@@ -115,10 +115,7 @@ void setup()
 
 // loop has idle task hook, it runs when nothing else is going on
 // left empty to allow resource cleanup
-void loop()
-{
-  vTaskDelay(100);
-}
+void loop() {}
 
 void ledcmd(uint8_t code)
 {
@@ -219,7 +216,6 @@ void modeManager(void * parameter)
   uint8_t mode;
   for (;;)
   {
-    Serial.print("U");
     if (xQueueReceive(RTOS_modeManager_queue, &mode, 0) == pdTRUE)  // pdTRUE means there is a mode in queue
     {
       if (mode != MODE_MANUAL)  // if mode is manual skip, next loop queue is clear and enter manual mode
@@ -338,7 +334,7 @@ void modeManager(void * parameter)
       {
         uint16_t speed_raw = analogRead(PIN_SPEED);
         encoder_speed = map(speed_raw, 0, 4095, 1, SPEED_STEPS);
-        mainframe.setSpeedInt(encoder_speed
+        mainframe.setSpeedInt(encoder_speed);
       }
       
       // select movement
@@ -396,17 +392,12 @@ void modeManager(void * parameter)
         }
         else if (btn_down.justPressed() && mainframe.cgDown())
         {
-          Serial.print("2");
           mainframe.stop();
-          Serial.print("3");
           mainframe.down();
-          Serial.print("4");
           ledcmd(LED_2);
-          Serial.print("5");
         }
         else if (btn_up.justReleased() || btn_down.justReleased())
         {
-          Serial.print("R");
           mainframe.stop();
           ledcmd(LED_OFF);
         }  

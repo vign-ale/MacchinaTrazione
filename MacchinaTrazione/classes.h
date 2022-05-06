@@ -26,7 +26,7 @@
 #define LED_CAL_UP 7
 #define LED_CAL_DOWN 8
 
-#define MANUAL_FREQ 500  // millis cooldown between measurements
+#define MANUAL_FREQ 50  // millis cooldown between measurements
 #define CAL_TIME 5000  // millis time to press to start calibration
 
 #define SPEED_STEPS 4
