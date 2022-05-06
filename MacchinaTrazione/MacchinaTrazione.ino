@@ -2,7 +2,8 @@
 
 //input btn_manual;
 //input btn_confirm;
-uint8_t encoder_speed = 1;
+uint8_t encoder_speed = 1
+;bool speed_read_encoder = true;
 // input endstops[4] = { input(PIN_ENDSTOP_1, true), input(PIN_ENDSTOP_2, true), input(PIN_ENDSTOP_3, true), input(PIN_ENDSTOP_4, true)};
 input endstops[4] = {{PIN_ENDSTOP_1, false}, {PIN_ENDSTOP_2, false}, {PIN_ENDSTOP_3, false}, {PIN_ENDSTOP_4, false}};
 // input btn_confirm(PIN_CONFIRM, false);
@@ -14,7 +15,7 @@ led led3(PIN_LED3);
 
 #define PIN_LOADCELL_DOUT 15
 #define PIN_LOADCELL_SCK 2
-const uint16_t LOADCELL_DIVIDER = 5895655;
+const uint32_t LOADCELL_DIVIDER = 5895655;
 HX711 loadcell;
 
 uint16_t millis_elapsed;
@@ -24,6 +25,7 @@ uint16_t millis_elapsed;
 #define PIN_STEPB 25
 #define PIN_DIR 27 // do not need 2 direction pins as asymmetric movement is not planned
 uint8_t pulse_length = 10;
+float steps_per_mm = 200 * 1 * 26.85 / 5; // Steps per rev * Microstepping * Gear reduction ratio / Pitch
 
 frame mainframe;
 
@@ -40,7 +42,6 @@ QueueHandle_t RTOS_ledManager_queue;
 TaskHandle_t RTOS_dataReader_handle;
 TaskHandle_t RTOS_limitCheck_handle;
 TaskHandle_t RTOS_serialComm_handle;
-TaskHandle_t RTOS_idleTask_handle;
 
 // here we use an ISR to activate a task that runs checkLimit
 // the task is not used elsewhere as it is better to make it run in other task
@@ -94,8 +95,7 @@ void setup()
   xTaskCreate(stepControl, "Step controller", 3000, NULL, 10, &RTOS_stepControl_handle);
   xTaskCreate(modeManager, "Mode manager", 3000, NULL, 3, &RTOS_modeManager_handle);
   xTaskCreate(limitCheck, "ISR limitCheck", 1000, NULL, 9, &RTOS_limitCheck_handle);
-  xTaskCreate(serialComm, "Serial communication", 2000, NULL, 9, &RTOS_serialComm_handle);
-  RTOS_idleTask_handle = xTaskGetIdleTaskHandle();
+  xTaskCreate(serialComm, "Serial communication", 2000, NULL, 8, &RTOS_serialComm_handle);
 
   Serial.print("Mainframe initalization...");
   mainframe.init();
@@ -128,6 +128,7 @@ void stepControl(void * parameter)
   bool dir;
   uint8_t step_active; // 0 both, 1 A, 2 B
   uint16_t step_delay;
+  TaskHandle_t RTOS_idleTask_handle;
 
   for (;;)
   {
@@ -138,7 +139,8 @@ void stepControl(void * parameter)
 
     // this function can run for a very long time
     // unsubscribe TWDT from idle task to prevent crash
-    esp_task_wdt_delete(RTOS_idleTask_handle);
+    //RTOS_idleTask_handle = xTaskGetIdleTaskHandle();
+    //esp_task_wdt_delete(RTOS_idleTask_handle);
 
     // get movement variables
     dir = mainframe.getDir();
@@ -161,6 +163,7 @@ void stepControl(void * parameter)
     // stopping will be handled by interrupt, we just want to now if we can start moving
     if (direction_allowed)
     {
+      Serial.println("Start");
       switch (move_mode)
       {
         case MOVE_INDEF:
@@ -184,31 +187,30 @@ void stepControl(void * parameter)
                 delayMicroseconds(pulse_length);
                 digitalWrite(PIN_STEPA, LOW);
                 digitalWrite(PIN_STEPB, LOW);
-                delayMicroseconds(step_delay);
               }
               case 1: // stepper A active
               {
                 digitalWrite(PIN_STEPA, HIGH);
                 delayMicroseconds(pulse_length);
                 digitalWrite(PIN_STEPA, LOW);
-                delayMicroseconds(step_delay);
               }
               case 2: // stepper B active
               {
                 digitalWrite(PIN_STEPB, HIGH);
                 delayMicroseconds(pulse_length);
                 digitalWrite(PIN_STEPB, LOW);
-                delayMicroseconds(step_delay);
               }
             }
-            esp_task_wdt_reset();
+            delayMicroseconds(step_delay);
+            vTaskDelay(1);
           }
         }
       }
+      Serial.println("Stop");
     }
 
     // reactivate TWTD for idle task
-    esp_task_wdt_add(RTOS_idleTask_handle);
+    //esp_task_wdt_add(RTOS_idleTask_handle);
   }
 }
 
@@ -228,7 +230,7 @@ void modeManager(void * parameter)
             {
               ledcmd(LED_CAL_UP);
               mainframe.setSteppers(0);
-              mainframe.setDelay(DELAY_1);
+              mainframe.setDelay(DELAY_MIN);
               mainframe.up();
               while (mainframe.cgUp())
               {
@@ -253,7 +255,7 @@ void modeManager(void * parameter)
               }
               // now both sides have been pressed
               // slow down, reverse and level slowly
-              mainframe.setDelay(DELAY_3);
+              mainframe.setSpeed(50);
               mainframe.setSteppers(1);
               mainframe.down();
               while (!mainframe.cgUp())
@@ -275,7 +277,7 @@ void modeManager(void * parameter)
             {
               ledcmd(LED_CAL_DOWN);
               mainframe.setSteppers(0);
-              mainframe.setDelay(DELAY_1);
+              mainframe.setDelay(DELAY_MIN);
               mainframe.down();
               while (mainframe.cgDown())
               {
@@ -300,7 +302,7 @@ void modeManager(void * parameter)
               }
               // now both sides have been pressed
               // slow down, reverse and level slowly
-              mainframe.setDelay(DELAY_3);
+              mainframe.setSpeed(50);
               mainframe.setSteppers(1);
               mainframe.up();
               while (!mainframe.cgDown())
@@ -323,18 +325,20 @@ void modeManager(void * parameter)
         }
         mainframe.setMode(MODE_MANUAL); // always set manual mode after executing automatic mode test
       }
-      
     }
     else  // pdFALSE, there is no mode in queue so we are in manual mode
     {
       // read buttons
       btn_up.read();
       btn_down.read();
+
       // calculate speed
-      uint16_t speed_raw = analogRead(PIN_SPEED);
-      encoder_speed = map(speed_raw, 0, 4095, 1, SPEED_STEPS);
-      uint16_t delay_new;
-      mainframe.setDelayInt(encoder_speed);
+      if (speed_read_encoder)
+      {
+        uint16_t speed_raw = analogRead(PIN_SPEED);
+        encoder_speed = map(speed_raw, 0, 4095, 1, SPEED_STEPS);
+        mainframe.setSpeedInt(encoder_speed);
+      }
 
       // select movement
       if (btn_up.isPressed() && btn_down.isPressed()) // should not press both, failsafe stops and starts calibration cooldown
@@ -383,13 +387,13 @@ void modeManager(void * parameter)
       }
       else
       {
-        if (btn_up.justPressed())// && endstops[0].isReleased() && endstops[1].isReleased()) // check movement bounds
+        if (btn_up.justPressed() && mainframe.cgUp()) // check movement bounds
         {
           mainframe.stop();
           mainframe.up();
           ledcmd(LED_1);
         }
-        else if (btn_down.justPressed())// && endstops[2].isReleased() && endstops[3].isReleased())
+        else if (btn_down.justPressed() && mainframe.cgDown())
         {
           mainframe.stop();
           mainframe.down();
@@ -415,7 +419,7 @@ void ledManager(void * parameter)
   {
     xQueueReceive(RTOS_ledManager_queue, &cmd, portMAX_DELAY);
     ulTaskNotifyTake(pdTRUE, 0);  // clear previous notifications
-    Serial.println((String)"Led: "+cmd);
+    //Serial.println((String)"Led: "+cmd);
 
     switch (cmd)
     {
@@ -436,7 +440,6 @@ void ledManager(void * parameter)
           led1.off();
           led2.off();
           led3.off();
-          vTaskDelay(200);
         }
         break;
       case LED_OK:
@@ -455,36 +458,24 @@ void ledManager(void * parameter)
       case LED_1:
         {
           led1.on();
-          while (!ulTaskNotifyTake(pdTRUE, 0))
-          {
-            vTaskDelay(10);
-          }
+          ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
           led1.off();
-          vTaskDelay(200);
         }
         break;
       case LED_2:
         {
           led2.on();
-          while (!ulTaskNotifyTake(pdTRUE, 0))
-          {
-            vTaskDelay(10);
-          }
+          ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
           led2.off();
-          vTaskDelay(200);
         }
         break;
       case LED_12:
         {
           led1.on();
           led2.on();
-          while (!ulTaskNotifyTake(pdTRUE, 0))
-          {
-            vTaskDelay(10);
-          }
+          ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
           led1.off();
           led2.off();
-          vTaskDelay(200);
         }
         break;
       case LED_CAL_SELECT:
@@ -499,33 +490,24 @@ void ledManager(void * parameter)
             led2.on();
           }
           led2.off();
-          vTaskDelay(200);
         }
         break;
       case LED_CAL_UP:
         {
           led1.on();
           led3.on();
-          while (!ulTaskNotifyTake(pdTRUE, 0))
-          {
-            vTaskDelay(10);
-          }
+          ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
           led1.off();
           led3.off();
-          vTaskDelay(200);
         }
         break;
       case LED_CAL_DOWN:
         {
           led2.on();
           led3.on();
-          while (!ulTaskNotifyTake(pdTRUE, 0))
-          {
-            vTaskDelay(10);
-          }
+          ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
           led2.off();
           led3.off();
-          vTaskDelay(200);
         }
         break;
     }
@@ -552,7 +534,6 @@ void serialComm(void * parameter)
   for(;;)
   {
     vTaskDelayUntil( &xLastWakeTime, xFrequency);
-    xLastWakeTime = xTaskGetTickCount();
 
     // receive data
     while (Serial.available() > 0)
@@ -573,6 +554,7 @@ void serialComm(void * parameter)
         // add null character to string
         cmd[cmd_pos] = '\0';
 
+        Serial.println((String)"Received command: "+cmd);
         // we do not make any input validation
         // please make sure incoming data is less than 16 character long
         // and is also a single command formatted like M1234 (16 char max total)
@@ -593,39 +575,44 @@ void serialComm(void * parameter)
               }
             }
             break;
-          case 'S': // setting has been sent
+          case 'D': // delay setting has been sent
             {
-              Serial.println("S case");
-              // remove S char
-              for (uint8_t i = 0; i < MAX_CMD_LENGTH - 1; ++i)
+              cmd_int = cmdtoi(cmd);
+              // delay 0 enables the encoder speed reader
+              if (cmd_int == 0)
               {
-                cmd[i] = cmd[i+1];
+                speed_read_encoder = true;
               }
-
-              switch (cmd[0]) // second char is setting type
+              else
               {
-                case 'D':
-                  {
-                    Serial.println("D case");
-                    cmd_int = cmdtoi(cmd);
-                    // DELAY_1 > 10 for sure
-                    // this allows to use predefined delays and custom delay in command
-                    if (cmd_int > DELAY_1)
-                    {
-                      mainframe.setDelay(cmd_int);
-                    }
-                    else
-                    {
-                      mainframe.setDelayInt(cmd_int);
-                    }
-                  }
-                  break;
-              // TODO config
+                speed_read_encoder = false;
+                mainframe.setDelay(cmd_int);
               }
             }
             break;
+
+
+
+
+          case 'S': // setting has been sent
+            {
+              cmd_int = cmdtoi(cmd);
+              // speed 0 enables the encoder speed reader
+              if (cmd_int == 0)
+              {
+                speed_read_encoder = true;
+              }
+              else
+              {
+                speed_read_encoder = false;
+                mainframe.setSpeed(cmd_int);
+              }
+              
+            }
+            break;
+
+            // TODO config
         }
-        Serial.println((String)"Received command: "+cmd);
         Serial.println((String)"Command meaning: "+cmd_int);
         // reset for the next command
         cmd_pos = 0;
