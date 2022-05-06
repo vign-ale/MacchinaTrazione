@@ -2,8 +2,9 @@
 
 //input btn_manual;
 //input btn_confirm;
-uint8_t encoder_speed = 1
-;bool speed_read_encoder = true;
+uint8_t encoder_speed = 1;
+bool speed_read_encoder = true;
+
 // input endstops[4] = { input(PIN_ENDSTOP_1, true), input(PIN_ENDSTOP_2, true), input(PIN_ENDSTOP_3, true), input(PIN_ENDSTOP_4, true)};
 input endstops[4] = {{PIN_ENDSTOP_1, false}, {PIN_ENDSTOP_2, false}, {PIN_ENDSTOP_3, false}, {PIN_ENDSTOP_4, false}};
 // input btn_confirm(PIN_CONFIRM, false);
@@ -60,6 +61,7 @@ void limitCheck(void * parameter)
   for (;;)
   {
     ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+    Serial.println("ISR exec");
     mainframe.checkLimit();
   }
 
@@ -87,8 +89,7 @@ void setup()
   //  1,         // Task priority
   //  &time_display_update_handle      // Task handle
   //  );
-  //RTOS_stepControl_semaphore = xSemaphoreCreateBinary();
-  //xSemaphoreGive(RTOS_stepControl_semaphore);
+
   RTOS_modeManager_queue = xQueueCreate(4, sizeof(uint8_t));
   RTOS_stepControl_queue = xQueueCreate(4, sizeof(uint8_t));
 
@@ -114,7 +115,10 @@ void setup()
 
 // loop has idle task hook, it runs when nothing else is going on
 // left empty to allow resource cleanup
-void loop() {}
+void loop()
+{
+  vTaskDelay(100);
+}
 
 void ledcmd(uint8_t code)
 {
@@ -129,7 +133,6 @@ void stepControl(void * parameter)
   uint8_t step_active; // 0 both, 1 A, 2 B
   uint16_t step_delay;
   TaskHandle_t RTOS_idleTask_handle;
-
   for (;;)
   {
     // we are using a queue to allow for different moving modes in future
@@ -208,9 +211,6 @@ void stepControl(void * parameter)
       }
       Serial.println("Stop");
     }
-
-    // reactivate TWTD for idle task
-    //esp_task_wdt_add(RTOS_idleTask_handle);
   }
 }
 
@@ -219,6 +219,7 @@ void modeManager(void * parameter)
   uint8_t mode;
   for (;;)
   {
+    Serial.print("U");
     if (xQueueReceive(RTOS_modeManager_queue, &mode, 0) == pdTRUE)  // pdTRUE means there is a mode in queue
     {
       if (mode != MODE_MANUAL)  // if mode is manual skip, next loop queue is clear and enter manual mode
@@ -230,7 +231,7 @@ void modeManager(void * parameter)
             {
               ledcmd(LED_CAL_UP);
               mainframe.setSteppers(0);
-              mainframe.setDelay(DELAY_MIN);
+              mainframe.setDelay(DELAY_MIN);  // max speed
               mainframe.up();
               while (mainframe.cgUp())
               {
@@ -277,7 +278,7 @@ void modeManager(void * parameter)
             {
               ledcmd(LED_CAL_DOWN);
               mainframe.setSteppers(0);
-              mainframe.setDelay(DELAY_MIN);
+              mainframe.setDelay(DELAY_MIN);  // max speed
               mainframe.down();
               while (mainframe.cgDown())
               {
@@ -337,9 +338,9 @@ void modeManager(void * parameter)
       {
         uint16_t speed_raw = analogRead(PIN_SPEED);
         encoder_speed = map(speed_raw, 0, 4095, 1, SPEED_STEPS);
-        mainframe.setSpeedInt(encoder_speed);
+        mainframe.setSpeedInt(encoder_speed
       }
-
+      
       // select movement
       if (btn_up.isPressed() && btn_down.isPressed()) // should not press both, failsafe stops and starts calibration cooldown
       {
@@ -395,12 +396,17 @@ void modeManager(void * parameter)
         }
         else if (btn_down.justPressed() && mainframe.cgDown())
         {
+          Serial.print("2");
           mainframe.stop();
+          Serial.print("3");
           mainframe.down();
+          Serial.print("4");
           ledcmd(LED_2);
+          Serial.print("5");
         }
         else if (btn_up.justReleased() || btn_down.justReleased())
         {
+          Serial.print("R");
           mainframe.stop();
           ledcmd(LED_OFF);
         }  
@@ -511,6 +517,7 @@ void ledManager(void * parameter)
         }
         break;
     }
+    vTaskDelay(50); // min 50ms between messages
   }
 }
 
@@ -607,7 +614,6 @@ void serialComm(void * parameter)
                 speed_read_encoder = false;
                 mainframe.setSpeed(cmd_int);
               }
-              
             }
             break;
 
@@ -618,7 +624,6 @@ void serialComm(void * parameter)
         cmd_pos = 0;
       }
     }
-
     // TODO: transimt data
   }
 }

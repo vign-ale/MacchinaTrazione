@@ -38,9 +38,11 @@ void frame::up()
 
 void frame::down()
 {
+  Serial.println("Before queue");
   _dir = false;
   uint8_t move_mode = MOVE_INDEF;
   xQueueSend(RTOS_stepControl_queue, &move_mode, 0);
+  Serial.println("After queue");
 }
 
 void frame::stop()
