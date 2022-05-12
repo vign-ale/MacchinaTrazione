@@ -25,22 +25,32 @@ void frame::init()
   // _moving = false;
   // _stop = false;
   _step_active = 0;
-  _step_delay = 100;
+  _step_delay = 1000;
   checkLimit();
+}
+
+void frame::up(uint32_t steps)
+{
+  _dir = true;
+  uint32_t move_mode = steps;
+  xQueueSend(RTOS_stepControl_queue, &move_mode, 0);
 }
 
 void frame::up()
 {
-  _dir = true;
-  uint8_t move_mode = MOVE_INDEF;
+  up(MOVE_INDEF);
+}
+
+void frame::down(uint32_t steps)
+{
+  _dir = false;
+  uint32_t move_mode = steps;
   xQueueSend(RTOS_stepControl_queue, &move_mode, 0);
 }
 
 void frame::down()
 {
-  _dir = false;
-  uint8_t move_mode = MOVE_INDEF;
-  xQueueSend(RTOS_stepControl_queue, &move_mode, 0);
+  down(MOVE_INDEF);
 }
 
 void frame::stop()
@@ -144,7 +154,7 @@ void frame::setSteppers(uint8_t steppers)
   checkLimit();
 }
 
-void frame::setDelay(uint16_t step_delay)
+void frame::setDelay(uint32_t step_delay)
 {
   if (step_delay < DELAY_MIN)
   {
@@ -165,6 +175,7 @@ void frame::setSpeed(float speed)
   delay_micros = round(delay_micros - pulse_length); // additional delay from pulse_length removed
 
   // if delay is < pulse_length we would be for sure too fast
+  // also prevents nergative values from causing errors
   if (delay_micros < pulse_length)
   {
     delay_micros = pulse_length;
@@ -205,7 +216,7 @@ uint8_t frame::getSteppers()
   return _step_active;
 }
 
-uint16_t frame::getDelay()
+uint32_t frame::getDelay()
 {
   return _step_delay;
 }

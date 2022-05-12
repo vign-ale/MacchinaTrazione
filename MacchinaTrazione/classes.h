@@ -34,7 +34,7 @@
 #define SPEED_1 2
 #define SPEED_2 10
 #define SPEED_3 20
-#define SPEED_4 55
+#define SPEED_4 55  // this is max speed with delay 1ms
 
 // input configuration
 #define PIN_ENDSTOP_1 19
@@ -46,6 +46,7 @@
 #define PIN_SPEED 35
 #define PIN_UP 32
 #define PIN_DOWN 33
+#define PIN_ALT 18
 #define PIN_LED1 14 // green top led
 #define PIN_LED2 12 // green bottom led
 #define PIN_LED3 13 // red led
@@ -56,27 +57,29 @@ class frame
   private:
     uint8_t _mode;
     uint8_t _step_active; // 0 both, 1 A, 2 B
-    uint16_t _step_delay;
+    uint32_t _step_delay;
     bool _dir;  // true is up, false is down
     //bool _stop;
     bool _space_up;
     bool _space_down;
   public:
     void init();
+    void up(uint32_t steps);
     void up();
+    void down(uint32_t steps);
     void down();
     void stop();
     void checkLimit();
 
     bool setMode(uint8_t mode_new);
     void setSteppers(uint8_t steppers);
-    void setDelay(uint16_t delay);
+    void setDelay(uint32_t delay);
     void setSpeed(float speed);
     void setSpeedInt(uint8_t speed_int);
 
     uint8_t getMode();
     uint8_t getSteppers();
-    uint16_t getDelay();
+    uint32_t getDelay();
     bool getDir();
     bool cgUp(); // can go up
     bool cgDown(); // can go down
