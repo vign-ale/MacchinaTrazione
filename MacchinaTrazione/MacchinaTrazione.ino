@@ -48,8 +48,8 @@ QueueHandle_t RTOS_ledManager_queue;
 TaskHandle_t RTOS_dataReader_handle;
 TaskHandle_t RTOS_limitCheck_handle;
 TaskHandle_t RTOS_serialComm_handle;
-
-QueueHandle_t RTOS_readLoad_queue;
+QueueHandle_t RTOS_force_queue;
+QueueHandle_t RTOS_ex1_queue;
 
 // here we use an ISR to activate a task that runs checkLimit
 // the task is not used elsewhere as it is better to make it run in other task
@@ -98,7 +98,8 @@ void setup()
 
   RTOS_modeManager_queue = xQueueCreate(4, sizeof(uint8_t));
   RTOS_stepControl_queue = xQueueCreate(4, sizeof(uint32_t));
-  RTOS_readLoad_queue = xQueueCreate(20, sizeof(float));
+  RTOS_force_queue = xQueueCreate(20, sizeof(float));
+  RTOS_ex1_queue = xQueueCreate(20, sizeof(float));
 
   xTaskCreate(stepControl, "Step controller", 3000, NULL, 10, &RTOS_stepControl_handle);
   xTaskCreate(modeManager, "Mode manager", 3000, NULL, 3, &RTOS_modeManager_handle);
@@ -467,6 +468,8 @@ void ledManager(void * parameter)
       case LED_OFF:
         {
           led1.off();
+          led2.off();
+          led3.off();
         }
         break;
       case LED_ERROR:
@@ -573,11 +576,15 @@ void serialComm(void * parameter)
 {
   TickType_t xLastWakeTime = xTaskGetTickCount();
   const TickType_t xFrequency = 100; // delay for mS
+
+  uint16_t msg_force;
+  uint16_t msg_ex1;
+  uint16_t force_available;
+  uint16_t ex1_available;
   // create a place to hold the incoming command
-  char cmd[MAX_CMD_LENGTH];
+  char cmd[CMD_MAX_LENGTH];
   uint8_t cmd_pos = 0;
   float cmd_int;
-
   for(;;)
   {
     vTaskDelayUntil(&xLastWakeTime, xFrequency);
@@ -588,14 +595,81 @@ void serialComm(void * parameter)
       if (serial_matlab)  // matlab communication protocol
       {
         //TODO: add matlab decode
+        uint8_t inByte = Serial.read();
+        if (inByte == CMD_MATLAB_START)
+        {
+          Serial.println("Recognized...");
+          uint16_t temp;
+          uint8_t cmd[CMD_MATLAB_LENGTH];
+          // serial.read() returns -1 if no data is available (wrong message)
+          // we use this to exclude bad messages
+          for (uint8_t i = 0; i < CMD_MATLAB_LENGTH; ++i)
+          {
+            inByte = Serial.read();
+            if (inByte == -1)
+            {
+              cmd[i] = inByte;
+            }
+            else
+            {
+              i = CMD_MATLAB_LENGTH;
+            }
+          }
+          if (inByte != -1) // last byte was ok, so all message was ok
+          {
+            // byte 1,2 are speed
+            // speed is passed in 0.01mm/min = 10 microm/min
+            temp = cmd[1] * 256 + cmd[2];
+            mainframe.setSpeed(temp);
+            // byte 3,4 are extension
+            temp = cmd[3] * 256 + cmd[4];
+            // byte 5,6 are force
+            temp = cmd[5] * 256 + cmd[6];
+            // byte 0 is mode
+            // it is set last to prevent from starting test early
+            // without all the config data provided in the message
+            mainframe.setMode(cmd[0]);
+            // send ack to matlab
+            Serial.print(CMD_MATLAB_ACK);
+            ledcmd(LED_OK);
+          }
+          else
+          {
+            // return wrong command
+          }
+        }
+        else if (inByte == SERIAL_MANUAL)
+        {
+          ledcmd(LED_OK);
+          serial_matlab = false;
+          Serial.println("Switching to manual command mode...");
+          // clear buffer
+          while (Serial.available() > 0)
+          {
+            inByte = Serial.read();
+          }
+        }
+        // message was invalid, remove everyhting from buffer
+        // we remove everything because we aren't sure when next good message starts
+        else
+        {
+          Serial.print(inByte);
+          Serial.println(" is not a MATLAB start code");
+          // clear buffer
+          while (Serial.available() > 0)
+          {
+            inByte = Serial.read();
+          }
+        }       
       }
       else  // serial monitor communication protocol
       {
+        
         // read the next available byte in the serial receive buffer
         char inByte = Serial.read();
 
         // command coming in (check not terminating character) and guard for over command size
-        if (inByte != '\n' && (cmd_pos < MAX_CMD_LENGTH - 1))
+        if (inByte != '\n' && (cmd_pos < CMD_MAX_LENGTH - 1))
         {
           // add the incoming byte to our command
           cmd[cmd_pos] = inByte;
@@ -607,7 +681,7 @@ void serialComm(void * parameter)
           // add null character to string
           cmd[cmd_pos] = '\0';
 
-          Serial.println((String)"Received command: "+cmd);
+          Serial.println((String)"Command received: "+cmd);
           // we do not make any input validation
           // please make sure incoming data is less than 16 character long
           // and is also a single command formatted like M1234 (16 char max total)
@@ -626,6 +700,19 @@ void serialComm(void * parameter)
                 {
                   mainframe.setMode(cmd_int);
                 }
+                ledcmd(LED_OK);
+              }
+              break;
+            case 'S': // stepper to move has been sent
+              {
+                cmd_int = cmdtoi(cmd);
+                // input validation
+                if (cmd_int < 0 || cmd_int > 2)
+                {
+                  cmd_int = 0;
+                }
+                mainframe.setSteppers(cmd_int);
+                ledcmd(LED_OK);
               }
               break;
             case 'D': // delay setting has been sent
@@ -641,6 +728,7 @@ void serialComm(void * parameter)
                   speed_read_encoder = false;
                   mainframe.setDelay(cmd_int);
                 }
+                ledcmd(LED_OK);
               }
               break;
             case 'V': // speed has been sent
@@ -656,9 +744,10 @@ void serialComm(void * parameter)
                   speed_read_encoder = false;
                   mainframe.setSpeed(cmd_int);
                 }
+                ledcmd(LED_OK);
               }
               break;
-            case 'S': // space to move has been sent
+            case 'J': // space to jiggle has been sent
               {
                 cmd_int = cmdtoi(cmd);
                 if (cmd_int > 0)
@@ -669,29 +758,81 @@ void serialComm(void * parameter)
                 {
                   mainframe.down(-cmd_int); // we need to send positive value
                 }
-                else  // space 0 stops the motor
+                else  // jiggle 0 stops the steppers
                 {
                   mainframe.stop();
                 }
+                ledcmd(LED_OK);
               }
               break;
 
               // TODO config
           }
-          Serial.println((String)"Command meaning: "+cmd_int);
+          Serial.println((String)"Command value: "+cmd_int);
           // reset for the next command
           cmd_pos = 0;
         }
       }
     }
     // TODO: transimt data
+    force_available = false;
+    ex1_available = false;
+    if (xQueueReceive(RTOS_force_queue, &msg_force, 0) == pdTRUE)
+    {
+      force_available = true;
+    }
+    if (xQueueReceive(RTOS_ex1_queue, &msg_ex1, 0) == pdTRUE)
+    {
+      ex1_available = true;
+    }
+    // while (force_available || ex1_available)
+    // {
+    //   // message is available
+    //   if (serial_matlab)
+    //   {
+    //     // transmit initial byte
+    //     Serial.print(CMD_MATLAB_START);
+    //     // transmit force
+    //     if (force_available)
+    //     {
+    //       Serial.print(msg_force);
+    //     }
+    //     else
+    //     {
+    //       Serial.print(0);
+    //       Serial.print(0);
+    //     }
+    //     // transmit ex1
+    //     if (ex1_available)
+    //     {
+    //       Serial.print(msg_ex1);
+    //     }
+    //     else
+    //     {
+    //       Serial.print(0);
+    //       Serial.print(0);
+    //     }
+    //   }
+    //   else
+    //   {
+
+    //   }
+    //   if (xQueueReceive(RTOS_force_queue, &msg_force, 0) == pdTRUE)
+    //   {
+    //     force_available = true;
+    //   }
+    //   if (xQueueReceive(RTOS_ex1_queue, &msg_ex1, 0) == pdTRUE)
+    //   {
+    //     ex1_available = true;
+    //   }
+    // }
   }
 }
 
 float cmdtoi(char *cmd)
 {
   // dump the character wich only tells us the type
-  for (uint8_t i = 0; i < MAX_CMD_LENGTH - 1; ++i)
+  for (uint8_t i = 0; i < CMD_MAX_LENGTH - 1; ++i)
   {
     cmd[i] = cmd[i+1];
   }

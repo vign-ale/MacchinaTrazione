@@ -6,7 +6,11 @@
 #include "HX711.h"
 
 
-#define MAX_CMD_LENGTH 9  // max message length
+#define CMD_MAX_LENGTH 9  // max message length
+#define CMD_MATLAB_LENGTH 7  // matlab message length
+#define CMD_MATLAB_START 255  
+#define CMD_MATLAB_ACK 254
+#define SERIAL_MANUAL 88 // ASCII X character
 
 #define MODE_MANUAL 0
 #define MODE_CAL_UP 1

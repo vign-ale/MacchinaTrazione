@@ -21,12 +21,11 @@
 
 void frame::init()
 {
-  _mode = 0;  // start in manual mode
+  setMode(0);  // start in manual mode
   // _moving = false;
   // _stop = false;
-  _step_active = 0;
-  _step_delay = 1000;
-  checkLimit();
+  setSteppers(0);
+  setDelay(1000);
 }
 
 void frame::up(uint32_t steps)
