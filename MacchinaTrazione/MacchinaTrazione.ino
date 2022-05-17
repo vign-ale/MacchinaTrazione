@@ -595,7 +595,7 @@ void serialComm(void * parameter)
       if (serial_matlab)  // matlab communication protocol
       {
         //TODO: add matlab decode
-        uint8_t inByte = Serial.read();
+        int8_t inByte = Serial.read();
         if (inByte == CMD_MATLAB_START)
         {
           Serial.println("Recognized...");
@@ -603,19 +603,23 @@ void serialComm(void * parameter)
           uint8_t cmd[CMD_MATLAB_LENGTH];
           // serial.read() returns -1 if no data is available (wrong message)
           // we use this to exclude bad messages
+          bool error = false;
           for (uint8_t i = 0; i < CMD_MATLAB_LENGTH; ++i)
           {
             inByte = Serial.read();
+            Serial.println(inByte);
             if (inByte == -1)
             {
-              cmd[i] = inByte;
+              i = CMD_MATLAB_LENGTH;
+              error = true;
             }
             else
             {
-              i = CMD_MATLAB_LENGTH;
+              cmd[i] = inByte;
             }
           }
-          if (inByte != -1) // last byte was ok, so all message was ok
+          Serial.println(inByte);
+          if (!error) // so all message was ok
           {
             // byte 1,2 are speed
             // speed is passed in 0.01mm/min = 10 microm/min
@@ -636,6 +640,7 @@ void serialComm(void * parameter)
           else
           {
             // return wrong command
+            Serial.println("Wrong command length!");
           }
         }
         else if (inByte == SERIAL_MANUAL)
@@ -653,8 +658,7 @@ void serialComm(void * parameter)
         // we remove everything because we aren't sure when next good message starts
         else
         {
-          Serial.print(inByte);
-          Serial.println(" is not a MATLAB start code");
+          Serial.println((String)inByte+" is not a MATLAB start code");
           // clear buffer
           while (Serial.available() > 0)
           {
@@ -687,6 +691,13 @@ void serialComm(void * parameter)
           // and is also a single command formatted like M1234 (16 char max total)
           switch (cmd[0]) // first char is data type
           {
+            case 'X': // switch to MATLAB interface
+              {
+                serial_matlab = true;
+                Serial.println("Switching to MATLAB command mode...");
+                ledcmd(LED_OK);
+              }
+              break;
             case 'M': // mode has been sent
               {
                 cmd_int = cmdtoi(cmd);
