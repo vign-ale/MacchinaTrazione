@@ -153,31 +153,32 @@ void frame::setSteppers(uint8_t steppers)
   checkLimit();
 }
 
-void frame::setDelay(uint32_t step_delay)
+void frame::setDelay(uint32_t step_delay_new)
 {
-  if (step_delay < DELAY_MIN)
+  if (step_delay_new < DELAY_MIN)
   {
-    step_delay = DELAY_MIN;   
+    step_delay_new = DELAY_MIN;   
   }
-  if (step_delay != _step_delay)
+  if (step_delay_new != _step_delay)
   {
-    _step_delay = step_delay;
+    _step_delay = step_delay_new;
+    float speed_new = (1000000 / _step_delay) * (60 / steps_per_mm);
+    _speed = speed_new;
     Serial.println((String)"Delay stepper: "+_step_delay);
   }
 }
 
 void frame::setSpeed(float speed)
 {
-  // inpuut speed is in mm/min
+  // input speed is in mm/min
   float steps_second = speed * steps_per_mm / 60;  // conversion to s from min
-  float delay_micros = 1000000 / steps_second;  // micros in s / steps each second
+  float delay_micros = 1000000 / steps_second;  // (micros in s) / (steps each second)
   delay_micros = round(delay_micros - pulse_length); // additional delay from pulse_length removed
 
-  // if delay is < pulse_length we would be for sure too fast
-  // also prevents nergative values from causing errors
-  if (delay_micros < pulse_length)
+  // prevents negative values from causing errors
+  if (delay_micros < DELAY_MIN)
   {
-    delay_micros = pulse_length;
+    delay_micros = DELAY_MIN;
   }
   setDelay(delay_micros);
 }
@@ -218,6 +219,11 @@ uint8_t frame::getSteppers()
 uint32_t frame::getDelay()
 {
   return _step_delay;
+}
+
+float frame::getSpeed()
+{
+  return _speed;
 }
 
 bool frame::getDir()

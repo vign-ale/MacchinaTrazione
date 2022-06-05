@@ -6,8 +6,9 @@
 #include "HX711.h"
 
 
-#define CMD_MAX_LENGTH 9  // max message length
+#define CMD_SERIAL_LENGTH 8  // max message length
 #define CMD_MATLAB_LENGTH 7  // matlab message length
+#define CMD_MATLAB_OUTPUT 12  // matlab output length
 #define CMD_MATLAB_START 99  
 #define CMD_MATLAB_ACK 98
 #define SERIAL_MANUAL 88 // ASCII X character
@@ -62,6 +63,7 @@ class frame
     uint8_t _mode;
     uint8_t _step_active; // 0 both, 1 A, 2 B
     uint32_t _step_delay;
+    float _speed;
     bool _dir;  // true is up, false is down
     //bool _stop;
     bool _space_up;
@@ -84,6 +86,7 @@ class frame
     uint8_t getMode();
     uint8_t getSteppers();
     uint32_t getDelay();
+    float getSpeed();
     bool getDir();
     bool cgUp(); // can go up
     bool cgDown(); // can go down
