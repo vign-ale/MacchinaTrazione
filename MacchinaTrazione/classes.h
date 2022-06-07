@@ -27,17 +27,17 @@
 #define LED_1 3
 #define LED_2 4
 #define LED_12 5
-#define LED_CAL_SELECT 6
-#define LED_CAL_UP 7
-#define LED_CAL_DOWN 8
+#define LED_AUTO_SELECT 6
+#define LED_AUTO_UP 7
+#define LED_AUTO_DOWN 8
 
 #define MANUAL_FREQ 50  // millis cooldown between measurements
-#define CAL_TIME 5000  // millis time to press to start calibration
+#define CAL_TIME 1500  // millis time to press to start calibration
 
 #define SPEED_STEPS 4
 #define DELAY_MIN 1000
 #define SPEED_1 2
-#define SPEED_2 10
+#define SPEED_2 5
 #define SPEED_3 20
 #define SPEED_4 55  // this is max speed with delay 1ms
 
@@ -49,12 +49,17 @@
 //#define PIN_MANUAL 5
 //#define PIN_CONFIRM 6
 #define PIN_SPEED 35
-#define PIN_UP 32
-#define PIN_DOWN 33
-#define PIN_ALT 18
-#define PIN_LED1 14 // green top led
-#define PIN_LED2 12 // green bottom led
-#define PIN_LED3 13 // red led
+#define PIN_UP 39
+#define PIN_DOWN 34
+#define PIN_ALT 36
+// output configuration
+#define PIN_STEPA 17  // step A enable
+#define PIN_STEPB 5  // step B enable
+#define PIN_STEP 18 // step command
+#define PIN_DIR 16 // do not need 2 direction pins as asymmetric movement is not planned
+#define PIN_LED1 4 // green top led
+#define PIN_LED2 2 // green bottom led
+#define PIN_LED3 15 // red led
 
 
 class frame

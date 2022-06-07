@@ -14,12 +14,14 @@ led led1(PIN_LED1);
 led led2(PIN_LED2);
 led led3(PIN_LED3);
 
-HX711 loadcell;
-#define PIN_LOADCELL_DOUT 15
-#define PIN_LOADCELL_SCK 2
+HX711 loadcell, ex1;
+#define PIN_LOADCELL_DOUT 32
+#define PIN_LOADCELL_SCK 33
+#define PIN_EX1_DOUT 25
+#define PIN_EX1_SCK 26
 const uint32_t LOADCELL_OFFSET = 50682624;  // tare raw value
 const uint32_t LOADCELL_DIVIDER = 5895655;  // raw to N conversion value
-float loadcell_hz = 0.1;
+float loadcell_hz = 0.2;
 
 struct reading
 {
@@ -34,18 +36,17 @@ float force_current = 0;  // value in N
 float force_target = 0;
 float ex1_current = 0;  // value in ?
 float ex1_target = 0;
+float move_target_microm = 1000;
 
 uint16_t millis_elapsed;
 
 // stepper configuration
-#define PIN_STEPA 26
-#define PIN_STEPB 25
-#define PIN_DIR 27 // do not need 2 direction pins as asymmetric movement is not planned
 uint8_t pulse_length = 15;
 float steps_per_mm = 200 * 1 * 26.85 / 5; // Steps per rev * Microstepping * Gear reduction ratio / Pitch
 
 frame mainframe;
 uint32_t test_millis_start = 0;
+uint32_t test_steps = 0;
 
 // serial configuration
 bool serial_matlab = true;
@@ -133,6 +134,7 @@ void setup()
   attachInterrupt(PIN_ENDSTOP_4, endstop_trigger, CHANGE);
 
   loadcell.begin(PIN_LOADCELL_DOUT, PIN_LOADCELL_SCK);
+  loadcell.begin(PIN_EX1_DOUT, PIN_EX1_SCK);
 
   // notify setup ended
   Serial.println(" done!");
@@ -153,18 +155,17 @@ void ledcmd(uint8_t code)
 
 void stepControl(void * parameter)
 {
-  uint32_t move_mode;
+  uint32_t move_amount;
   bool dir;
   uint8_t step_active; // 0 both, 1 A, 2 B
   uint32_t step_delay;
   uint16_t step_delay_millis;
   uint16_t step_delay_micros;
-  TaskHandle_t RTOS_idleTask_handle;
   for (;;)
   {
     // we are using a queue to allow for different moving modes in future
     // also because multiple notification to task are NOT working (don't know why)
-    xQueueReceive(RTOS_stepControl_queue, &move_mode, portMAX_DELAY);
+    xQueueReceive(RTOS_stepControl_queue, &move_amount, portMAX_DELAY);
     ulTaskNotifyTake(pdTRUE, 0);  // clear previous stop notifications
 
     // this function can run for a very long time
@@ -178,20 +179,20 @@ void stepControl(void * parameter)
     step_delay = mainframe.getDelay();
     step_delay_millis = step_delay / 1000;
     step_delay_micros = step_delay % 1000;
-    Serial.println((String)"Delay: "+step_delay+" millis: "+step_delay_millis+" micros: "+step_delay_micros);
+    if (!serial_matlab) Serial.println((String)"Delay: "+step_delay+" millis: "+step_delay_millis+" micros: "+step_delay_micros);
 
     // set steppers direction and check if direction is free to move
     bool direction_allowed;
     if (dir)  // dir true is up
     {
       digitalWrite(PIN_DIR, HIGH);
-      Serial.println("ALTO");
+      if (!serial_matlab) Serial.println("ALTO");
       direction_allowed = mainframe.cgUp();  // free space is up
     }
     else
     {
       digitalWrite(PIN_DIR, LOW);
-      Serial.println("BASSO");
+      if (!serial_matlab) Serial.println("BASSO");
       direction_allowed = mainframe.cgDown();  // free space is down
     }
 
@@ -199,8 +200,31 @@ void stepControl(void * parameter)
     // stopping will be handled by interrupt, we just want to now if we can start moving
     if (direction_allowed)
     {
-      Serial.println("Start");
-      switch (move_mode)
+      // wake up correct stepper driver
+      switch (step_active)
+      {
+        case 0: // both steppers active
+          {
+            digitalWrite(PIN_STEPA, HIGH);
+            digitalWrite(PIN_STEPB, HIGH);
+          }
+          break;
+        case 1: // A stepper active
+          {
+            digitalWrite(PIN_STEPA, HIGH);
+          }
+          break;
+        case 2: // B stepper active
+          {
+            digitalWrite(PIN_STEPB, HIGH);
+          }
+          break;
+      }
+
+      if (!serial_matlab) Serial.println("Start moving...");
+
+      // start moving based on amount requested
+      switch (move_amount)
       {
         case MOVE_INDEF:
           {
@@ -210,7 +234,6 @@ void stepControl(void * parameter)
             uint16_t step_delay_new;
             while (!ulTaskNotifyTake(pdTRUE, 0))  // do not wait if there is no notification
             {
-              //Serial.println((String)"Loop start: "+millis());
               // we can move
 
               // this allows for changing speed without releasing movement button
@@ -218,22 +241,17 @@ void stepControl(void * parameter)
               if (step_delay_new != step_delay)
               {
                 step_delay = step_delay_new;
-                //Serial.println((String)"Loop mid 1: "+millis());
                 // calculate delay by using as little block time as possible with delayMicros
                 // step_delay is > 1000 for sure so vTD always executes for at least 1ms
                 step_delay_millis = step_delay / 1000;
-                //Serial.println((String)"Loop mid 2: "+millis());
                 step_delay_micros = step_delay % 1000;
-                Serial.println((String)"Delay: "+step_delay+" millis: "+step_delay_millis+" micros: "+step_delay_micros);
+                if (!serial_matlab) Serial.println((String)"Delay: "+step_delay+" millis: "+step_delay_millis+" micros: "+step_delay_micros);
               }
-              //Serial.println((String)"Loop mid 3: "+millis());
 
-              step(step_active);
+              step();
 
-              //Serial.println((String)"Loop mid 4: "+millis());
               delayMicroseconds(step_delay_micros);
               vTaskDelay(step_delay_millis);
-              //Serial.println((String)"Loop end: "+millis());
             }
           }
           break;
@@ -241,19 +259,22 @@ void stepControl(void * parameter)
           {
             // speed can not be changed in this mode
             // movement is defined in thousands of a mm
-            uint32_t steps = round(move_mode * steps_per_mm / 1000);
+            uint32_t steps = round(move_amount * steps_per_mm / 1000);
             while (!ulTaskNotifyTake(pdTRUE, 0) && steps > 0)
             {
-              Serial.println((String)"Steps to go: "+steps);
-              step(step_active);
+              //if (!serial_matlab) Serial.println((String)"Steps to go: "+steps);
+              step();
               delayMicroseconds(step_delay_micros);
               vTaskDelay(step_delay_millis);
               steps--;
             }
           }
       }
-      Serial.println("Stop");
+      if (!serial_matlab) Serial.println("Stop");
     }
+    // always disable all drivers
+    digitalWrite(PIN_STEPA, LOW);
+    digitalWrite(PIN_STEPB, LOW);
     // notify modeManager we have stopped
     xTaskNotifyGive(RTOS_modeManager_handle);
   }
@@ -269,11 +290,44 @@ void modeManager(void * parameter)
       if (mode != MODE_MANUAL)  // if mode is manual skip, next loop queue is clear and enter manual mode
       {
         mainframe.setMode(mode); // set mainframe mode
+        test_millis_start = millis();
+        test_steps = 0;
         switch (mode)
         {
+          // test modes
+          case MODE_WEIGHT:
+            {
+              vTaskDelay(5000);
+            }
+            break;
+          case MODE_LENGTH:
+            {
+              
+              ledcmd(LED_AUTO_UP);
+              uint32_t move_target_step = move_target_microm * steps_per_mm / 1000;
+              if (!serial_matlab)
+              {
+                Serial.println((String)"--- INIZIO TEST TEST ---");
+                Serial.println((String)"Tempo: "+(millis() - test_millis_start));
+                Serial.println((String)"Step richiesti: "+move_target_step);
+                Serial.println((String)"Step iniziali: "+test_steps);
+              }
+              mainframe.up(move_target_step);
+              ulTaskNotifyTake(pdTRUE, portMAX_DELAY);  // wait for movement stop
+              if (!serial_matlab)
+              {
+                Serial.println((String)"--- RISULTATI TEST ---");
+                Serial.println((String)"Tempo: "+(millis() - test_millis_start));
+                Serial.println((String)"Step richiesti: "+move_target_step);
+                Serial.println((String)"Step finali: "+test_steps);
+              }
+              ledcmd(LED_OK);
+            }
+            break;
+            // utility modes
           case MODE_CAL_UP:
             {
-              ledcmd(LED_CAL_UP);
+              ledcmd(LED_AUTO_UP);
               mainframe.setSpeed(50);
               mainframe.setSteppers(0);
               mainframe.setDelay(DELAY_MIN);  // max speed
@@ -305,7 +359,7 @@ void modeManager(void * parameter)
 
               // now both sides have been pressed
               // slow down, reverse and level slowly
-              mainframe.setSpeed(10);
+              mainframe.setSpeed(5);
               mainframe.setSteppers(1);
               mainframe.down();
               while (!mainframe.cgUp())
@@ -325,7 +379,7 @@ void modeManager(void * parameter)
             break;
           case MODE_CAL_DOWN:
             {
-              ledcmd(LED_CAL_DOWN);
+              ledcmd(LED_AUTO_DOWN);
               mainframe.setSpeed(50);
               mainframe.setSteppers(0);
               mainframe.setDelay(DELAY_MIN);  // max speed
@@ -357,7 +411,7 @@ void modeManager(void * parameter)
 
               // now both sides have been pressed
               // slow down, reverse and level slowly
-              mainframe.setSpeed(10);
+              mainframe.setSpeed(5);
               mainframe.setSteppers(1);
               mainframe.up();
               while (!mainframe.cgDown())
@@ -375,12 +429,6 @@ void modeManager(void * parameter)
               ledcmd(LED_OK);
             }
             break;
-          case MODE_LENGTH:
-            {
-
-            }
-            break;
-          // automatic modes
           //default:  // default means we are either in manual or not recognized mode, exit from switch and enter manual mode
         }
         mainframe.setMode(MODE_MANUAL); // always set manual mode after executing automatic mode test
@@ -418,7 +466,7 @@ void modeManager(void * parameter)
           // this selects and starts calibration routine
           if (millis_elapsed >= CAL_TIME)
           {
-            ledcmd(LED_CAL_SELECT);
+            ledcmd(LED_AUTO_SELECT);
             while (btn_up.isPressed() || btn_down.isPressed())  // wait for release of both buttons
             {
               vTaskDelay(MANUAL_FREQ);
@@ -497,9 +545,9 @@ void ledManager(void * parameter)
           led3.on();
           vTaskDelay(500);
           ulTaskNotifyTake(pdTRUE, portMAX_DELAY);  // keep led on if code has an issue and doesn't unlock
-          led1.on();
-          vTaskDelay(500);
           led2.on();
+          vTaskDelay(500);
+          led1.on();
           vTaskDelay(500);
           led1.off();
           led2.off();
@@ -542,7 +590,7 @@ void ledManager(void * parameter)
           led2.off();
         }
         break;
-      case LED_CAL_SELECT:
+      case LED_AUTO_SELECT:
         {
           while (!ulTaskNotifyTake(pdTRUE, 0))
           {
@@ -556,7 +604,7 @@ void ledManager(void * parameter)
           led2.off();
         }
         break;
-      case LED_CAL_UP:
+      case LED_AUTO_UP:
         {
           led1.on();
           led3.on();
@@ -565,7 +613,7 @@ void ledManager(void * parameter)
           led3.off();
         }
         break;
-      case LED_CAL_DOWN:
+      case LED_AUTO_DOWN:
         {
           led2.on();
           led3.on();
@@ -594,42 +642,14 @@ void dataReader(void * parameter)
   //   uint16_t ex1; // in TBD
   // }
 
-  // struct AMessage
-//  {
-//     char ucMessageID;
-//     char ucData[ 20 ];
-//  } xMessage;
-
-//  void vATask( void *pvParameters )
-//  {
-//  QueueHandle_t xQueue1;
-//  struct AMessage *pxMessage;
-
-//     /* Create a queue capable of containing 10 pointers to AMessage structures.
-//     These should be passed by pointer as they contain a lot of data. */
-//     xQueue1 = xQueueCreate( 10, sizeof( struct AMessage * ) );
-
-//     /* ... */
-
-//     if( xQueue1 != 0 )
-//     {
-//         /* Send a pointer to a struct AMessage object.  Don't block if the
-//         queue is already full. */
-//         pxMessage = & xMessage;
-//         xQueueSend( xQueue2, ( void * ) &pxMessage, ( TickType_t ) 0 );
-//     }
-
-//   /* ... Rest of task code. */
-//  }
-
-  //reading reading_last;
   struct reading reading_last;
   for (;;)
   {
+
     vTaskDelayUntil(&xLastWakeTime, xFrequency);
     reading_last.mode = mainframe.getMode();
     reading_last.speed = round(mainframe.getSpeed() * 100);
-    reading_last.timestamp = millis();
+    reading_last.timestamp = millis() - test_millis_start;
     //reading_last.force = round(loadcell.get_units(5) * 10);
     reading_last.force = 111;
     reading_last.ex1 = 999;
@@ -656,7 +676,6 @@ void serialComm(void * parameter)
     {
       if (serial_matlab)  // matlab communication protocol
       {
-        //TODO: add matlab decode
         int8_t inByte = Serial.read();
         if (inByte == CMD_MATLAB_START)
         {
@@ -691,16 +710,22 @@ void serialComm(void * parameter)
           float speed_new = (cmd[1] * 256 + cmd[2]) / 100;
           mainframe.setSpeed(speed_new);
           // byte 3,4 are extension
+          // extension is passed in microm
           ex1_target = cmd[3] * 256 + cmd[4];
+          // we can use extension but it is only relative
+          // we use target in steps because it is the only thing we can measure
+          // BEWARE we have no way to know is there are skipped steps, it is only a target
+          move_target_microm = ex1_target;
           // byte 5,6 are force
-          force_target = cmd[5] * 256 + cmd[6];
-          // byte 0 is mode
-          // it is set last to prevent from starting test early
-          // without all the config data provided in the message
-          mainframe.setMode(cmd[0]);
+          force_target = cmd[5] * 256 + cmd[6];;
           // send ack to matlab
           Serial.write(CMD_MATLAB_ACK);
           ledcmd(LED_OK);
+          // byte 0 is mode
+          // it is set last to prevent from starting test early
+          // without all the config data provided in the message
+          vTaskDelay(2000); // wait a while before starting
+          mainframe.setMode(cmd[0]);
           // else
           // {
           //   // return wrong command
@@ -718,17 +743,22 @@ void serialComm(void * parameter)
             inByte = Serial.read();
           }
         }
+        // message was invalid, start searching again for start byte
+        // we do nothing because serial available restart whole loop
+
+
+        // --- DEPRECATED ---
         // message was invalid, remove everyhting from buffer
         // we remove everything because we aren't sure when next good message starts
-        else
-        {
-          //Serial.println((String)inByte+" is not a MATLAB start code");
-          // clear buffer
-          while (Serial.available() > 0)
-          {
-            inByte = Serial.read();
-          }
-        }       
+        // else
+        // {
+        //   //Serial.println((String)inByte+" is not a MATLAB start code");
+        //   // clear buffer
+        //   while (Serial.available() > 0)
+        //   {
+        //     inByte = Serial.read();
+        //   }
+        //  }       
       }
       else  // serial monitor communication protocol
       {   
@@ -760,7 +790,7 @@ void serialComm(void * parameter)
           case 'X': // switch to MATLAB interface
             {
               serial_matlab = true;
-              Serial.println("Switching to MATLAB command mode...");
+              Serial.println("\nSwitching to MATLAB command mode...");
               ledcmd(LED_OK);
             }
             break;
@@ -844,7 +874,6 @@ void serialComm(void * parameter)
             break;
           default:
           Serial.println("Unknown initalizer!");
-            // TODO config
         }
         Serial.println((String)"Command value: "+cmd_int);
         // reset for the next command
@@ -908,34 +937,38 @@ float cmdtoi(char *cmd)
   return cmd_int;
 }
 
-void step(uint8_t stepper)
+void step()
 {
-  switch (stepper)
-  {
-    case 0: // both steppers active
-    { 
-      // NOTE: digitalWrite funtion is not fast to execute, but the delay should be << compared to pulse_lenght
-      // this means there is a slight asymmetry and delay between the right and left steppers, but it should not be an issue
-      // TODO: check if it's really an issue or not
-      digitalWrite(PIN_STEPA, HIGH);
-      digitalWrite(PIN_STEPB, HIGH);
-      delayMicroseconds(pulse_length);
-      digitalWrite(PIN_STEPA, LOW);
-      digitalWrite(PIN_STEPB, LOW);
-    }
-    case 1: // stepper A active
-    {
-      digitalWrite(PIN_STEPA, HIGH);
-      delayMicroseconds(pulse_length);
-      digitalWrite(PIN_STEPA, LOW);
-    }
-    case 2: // stepper B active
-    {
-      digitalWrite(PIN_STEPB, HIGH);
-      delayMicroseconds(pulse_length);
-      digitalWrite(PIN_STEPB, LOW);
-    }
-  }
+  digitalWrite(PIN_STEP, HIGH);
+  delayMicroseconds(pulse_length);
+  digitalWrite(PIN_STEP, LOW);
+  test_steps ++;
+  // switch (stepper)
+  // {
+  //   case 0: // both steppers active
+  //   { 
+  //     // NOTE: digitalWrite funtion is not fast to execute, but the delay should be << compared to pulse_lenght
+  //     // this means there is a slight asymmetry and delay between the right and left steppers, but it should not be an issue
+  //     // TODO: check if it's really an issue or not
+  //     digitalWrite(PIN_STEPA, HIGH);
+  //     digitalWrite(PIN_STEPB, HIGH);
+  //     delayMicroseconds(pulse_length);
+  //     digitalWrite(PIN_STEPA, LOW);
+  //     digitalWrite(PIN_STEPB, LOW);
+  //   }
+  //   case 1: // stepper A active
+  //   {
+  //     digitalWrite(PIN_STEPA, HIGH);
+  //     delayMicroseconds(pulse_length);
+  //     digitalWrite(PIN_STEPA, LOW);
+  //   }
+  //   case 2: // stepper B active
+  //   {
+  //     digitalWrite(PIN_STEPB, HIGH);
+  //     delayMicroseconds(pulse_length);
+  //     digitalWrite(PIN_STEPB, LOW);
+  //   }
+  // }
 }
 
 
