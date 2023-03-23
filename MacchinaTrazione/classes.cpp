@@ -25,14 +25,14 @@ void frame::init()
   // _moving = false;
   // _stop = false;
   setSteppers(0);
-  setDelay(1000);
+  setSpeed(20);
 }
 
-void frame::up(uint32_t steps)
+void frame::up(uint32_t microm)
 {
   _dir = true;
-  uint32_t move_mode = steps;
-  xQueueSend(RTOS_stepControl_queue, &move_mode, 0);
+  uint32_t move_step = microm * steps_per_microm;
+  xQueueSend(RTOS_stepControl_queue, &move_step, 0);
 }
 
 void frame::up()
@@ -40,11 +40,11 @@ void frame::up()
   up(MOVE_INDEF);
 }
 
-void frame::down(uint32_t steps)
+void frame::down(uint32_t microm)
 {
   _dir = false;
-  uint32_t move_mode = steps;
-  xQueueSend(RTOS_stepControl_queue, &move_mode, 0);
+  uint32_t move_step = microm * steps_per_microm;
+  xQueueSend(RTOS_stepControl_queue, &move_step, 0);
 }
 
 void frame::down()
@@ -155,32 +155,51 @@ void frame::setSteppers(uint8_t steppers)
 
 void frame::setDelay(uint32_t step_delay_new)
 {
-  if (step_delay_new < DELAY_MIN)
+  if (step_delay_new == 0)
   {
-    step_delay_new = DELAY_MIN;   
+    speed_read_encoder = true;
   }
-  if (step_delay_new != _step_delay)
+  else
   {
-    _step_delay = step_delay_new;
-    float speed_new = (1000000 / _step_delay) * (60 / steps_per_mm);
-    _speed = speed_new;
-    Serial.println((String)"Delay stepper: "+_step_delay);
+    if (step_delay_new < DELAY_MIN)
+    {
+      step_delay_new = DELAY_MIN;   
+    }
+    if (step_delay_new != _step_delay)
+    {
+      _step_delay = step_delay_new;
+      float speed_new = (1000000 / _step_delay) * (60 / steps_per_mm);
+      _speed = speed_new;
+      if (!serial_matlab) Serial.println((String)"Delay stepper: "+_step_delay);
+    }
   }
 }
 
-void frame::setSpeed(float speed)
+void frame::setSpeed(uint16_t speed)
 {
+  // sending speed 0 enables manual speed control
   // input speed is in mm/min
   float steps_second = speed * steps_per_mm / 60;  // conversion to s from min
-  float delay_micros = 1000000 / steps_second;  // (micros in s) / (steps each second)
-  delay_micros = round(delay_micros - pulse_length); // additional delay from pulse_length removed
+  if (!serial_matlab) Serial.println((String)"Steps per second: "+steps_second);
 
-  // prevents negative values from causing errors
-  if (delay_micros < DELAY_MIN)
+  float delay_micros = 0;
+  if (steps_second != 0)
   {
-    delay_micros = DELAY_MIN;
+    delay_micros = 1000000 / steps_second;  // (micros in s) / (steps each second)
+    delay_micros = round(delay_micros - pulse_length); // additional delay from pulse_length removed
+
+    // prevents negative values from causing errors
+    
   }
-  setDelay(delay_micros);
+  if (delay_micros >= 0)
+  {
+    if (!serial_matlab) Serial.println((String)"Setting speed, delay requested: "+delay_micros);
+    setDelay(delay_micros);
+  }
+  else
+  {
+    if (!serial_matlab) Serial.println((String)"Invalid speed!");
+  }
 }
 
 void frame::setSpeedInt(uint8_t speed_int)
@@ -188,6 +207,8 @@ void frame::setSpeedInt(uint8_t speed_int)
   float speed_new;
   switch (speed_int)
   {
+    case 0:
+      speed_new = 0;
     case 1:
       speed_new = SPEED_1;
       break;
