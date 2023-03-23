@@ -28,7 +28,7 @@ uint16_t millis_elapsed;
 
 // stepper configuration
 frame mainframe;
-uint8_t pulse_length = 15;
+uint8_t pulse_length = 10;
 float steps_per_mm = 200 * 1 * 26.85 / 5; // Steps per rev * Microstepping * Gear reduction ratio / Pitch
 float steps_per_microm = 200 * 1 * 26.85 / 5000; // Steps per rev * Microstepping * Gear reduction ratio / Pitch
 uint8_t encoder_speed = 1;
@@ -97,6 +97,8 @@ void setup()
   RTOS_ledManager_queue = xQueueCreate(4, sizeof(uint8_t));
   xTaskCreate(ledManager, "Led manager", 3000, NULL, 2, &RTOS_ledManager_handle);
   ledcmd(LED_ERROR);
+  
+  vTaskDelay(500);
   // pinMode(PIN_SPEED, INPUT); not sure why not needed?
   
   // put your setup code here, to run once:
@@ -109,6 +111,24 @@ void setup()
   //  &time_display_update_handle      // Task handle
   //  );
 
+  Serial.print("Mainframe initalization...\n");
+  pinMode(PIN_STEP, OUTPUT);
+  pinMode(PIN_STEPA, OUTPUT);
+  pinMode(PIN_STEPB, OUTPUT);
+  pinMode(PIN_DIR, OUTPUT);
+  pinMode(PIN_ALT, INPUT);
+  pinMode(PIN_ENDSTOP_1, INPUT);
+  pinMode(PIN_ENDSTOP_2, INPUT);
+  pinMode(PIN_ENDSTOP_3, INPUT);
+  pinMode(PIN_ENDSTOP_4, INPUT);
+  mainframe.init();
+
+  loadcell.begin(PIN_LOADCELL_DOUT, PIN_LOADCELL_SCK);
+  loadcell.begin(PIN_EX1_DOUT, PIN_EX1_SCK);
+  
+  vTaskDelay(500);
+  
+  Serial.print("Tasks initalization...\n");
   RTOS_modeManager_queue = xQueueCreate(4, sizeof(uint8_t));
   RTOS_stepControl_queue = xQueueCreate(4, sizeof(uint32_t));
   RTOS_readings_queue = xQueueCreate(100, sizeof(struct reading));
@@ -120,22 +140,6 @@ void setup()
   xTaskCreate(dataReader, "Data sampling", 1000, NULL, 5, &RTOS_dataReader_handle);
   xTaskCreate(serialComm, "Serial communication", 2000, NULL, 4, &RTOS_serialComm_handle);
   xTaskCreate(modeManager, "Mode manager", 3000, NULL, 3, &RTOS_modeManager_handle);
-
-  Serial.print("Mainframe initalization...\n");
-  pinMode(PIN_STEPA, OUTPUT);
-  pinMode(PIN_STEPB, OUTPUT);
-  pinMode(PIN_DIR, OUTPUT);
-  pinMode(PIN_ALT, INPUT);
-  pinMode(PIN_ENDSTOP_1, INPUT);
-  pinMode(PIN_ENDSTOP_2, INPUT);
-  pinMode(PIN_ENDSTOP_3, INPUT);
-  pinMode(PIN_ENDSTOP_4, INPUT);
-  mainframe.init();
-
-  vTaskDelay(100);
-
-  loadcell.begin(PIN_LOADCELL_DOUT, PIN_LOADCELL_SCK);
-  loadcell.begin(PIN_EX1_DOUT, PIN_EX1_SCK);
 
   // wait for reset button to be released
   while(!digitalRead(PIN_ALT))
@@ -150,8 +154,8 @@ void setup()
   //attachInterrupt(PIN_ENDSTOP_3, endstop_trigger, CHANGE);
   //attachInterrupt(PIN_ENDSTOP_4, endstop_trigger, CHANGE);
 
-
   vTaskDelay(500);
+  
   // notify setup ended
   Serial.println("All done! Hello.\n");
   ledcmd(LED_OK);
@@ -176,6 +180,7 @@ void stepControl(void * parameter)
     xQueueReceive(RTOS_stepControl_queue, &steps, portMAX_DELAY);
     // notifications are used to stop
     ulTaskNotifyTake(pdTRUE, 0);  // clear previous stop notifications
+    if (!serial_matlab) Serial.println("Stepper go command...");
 
     // this function can run for a very long time
     // unsubscribe TWDT from idle task to prevent crash
@@ -214,20 +219,20 @@ void stepControl(void * parameter)
       {
         case 0: // both steppers active
           {
-            digitalWrite(PIN_STEPA, HIGH);
-            digitalWrite(PIN_STEPB, HIGH);
+            digitalWrite(PIN_STEPA, LOW);
+            digitalWrite(PIN_STEPB, LOW);
           }
           break;
         case 1: // A stepper active
           {
-            digitalWrite(PIN_STEPA, HIGH);
-            digitalWrite(PIN_STEPB, LOW);
+            digitalWrite(PIN_STEPA, LOW);
+            digitalWrite(PIN_STEPB, HIGH);
           }
           break;
         case 2: // B stepper active
           {
-            digitalWrite(PIN_STEPA, LOW);
-            digitalWrite(PIN_STEPB, HIGH);
+            digitalWrite(PIN_STEPA, HIGH);
+            digitalWrite(PIN_STEPB, LOW);
           }
           break;
       }
@@ -285,8 +290,8 @@ void stepControl(void * parameter)
       if (!serial_matlab) Serial.println("Stop");
     }
     // always disable all drivers
-    digitalWrite(PIN_STEPA, LOW);
-    digitalWrite(PIN_STEPB, LOW);
+    digitalWrite(PIN_STEPA, HIGH);
+    digitalWrite(PIN_STEPB, HIGH);
     // notify modeManager we have stopped
     xTaskNotifyGive(RTOS_modeManager_handle);
   }

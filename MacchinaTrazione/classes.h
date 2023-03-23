@@ -37,11 +37,11 @@
 #define CAL_TIME 1500  // millis time to press to start calibration
 
 #define SPEED_STEPS 4
-#define DELAY_MIN 2000
+#define DELAY_MIN 1000
 #define SPEED_1 2 // speeds in mm/min
 #define SPEED_2 5
-#define SPEED_3 15
-#define SPEED_4 50 // this is max speed with delay 1ms
+#define SPEED_3 20
+#define SPEED_4 55 // this is max speed with delay 1ms
 
 // input configuration
 #define PIN_ENDSTOP_1 19

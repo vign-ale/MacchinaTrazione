@@ -161,16 +161,12 @@ void frame::setDelay(uint32_t step_delay_new)
   }
   else
   {
-    if (step_delay_new < DELAY_MIN)
-    {
-      step_delay_new = DELAY_MIN;   
-    }
     if (step_delay_new != _step_delay)
     {
       _step_delay = step_delay_new;
       float speed_new = (1000000 / _step_delay) * (60 / steps_per_mm);
       _speed = speed_new;
-      if (!serial_matlab) Serial.println((String)"Delay stepper: "+_step_delay);
+      if (!serial_matlab) Serial.println((String)"Delay stepper: "+_step_delay+" Speed: "+_speed);
     }
   }
 }
@@ -191,9 +187,15 @@ void frame::setSpeed(uint16_t speed)
     // prevents negative values from causing errors
     
   }
-  if (delay_micros >= 0)
+  if (delay_micros >= DELAY_MIN || delay_micros == 0)
   {
     if (!serial_matlab) Serial.println((String)"Setting speed, delay requested: "+delay_micros);
+    setDelay(delay_micros);
+  }
+  else if (delay_micros > 0)
+  {
+    delay_micros = DELAY_MIN;
+    if (!serial_matlab) Serial.println((String)"Setting speed to minimum delay: "+delay_micros);
     setDelay(delay_micros);
   }
   else

@@ -7,6 +7,7 @@ void step()
   delayMicroseconds(pulse_length);
   digitalWrite(PIN_STEP, LOW);
   test_steps ++;
+  //if (!serial_matlab) Serial.println((String)"Steps cleared: "+test_steps);
   // switch (stepper)
   // {
   //   case 0: // both steppers active
@@ -91,4 +92,3 @@ float cmdtoi(char *cmd)
   float cmd_int = atof(cmd);
   return cmd_int;
 }
-
