@@ -311,7 +311,7 @@ void input::read()
     if (_state == false)
     {
       _justPressed = true;
-      // Serial.println("ON");
+      if (!serial_matlab) Serial.println("Input pressed");
     }
     _state = true;
   }
@@ -320,7 +320,7 @@ void input::read()
     if (_state == true)
     {
       _justReleased = true;
-      // Serial.println("OFF");
+      if (!serial_matlab) Serial.println("Input released");
     }
     _state = false;
   }
