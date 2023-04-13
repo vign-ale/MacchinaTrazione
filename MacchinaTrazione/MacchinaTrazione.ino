@@ -9,10 +9,11 @@ led led2(PIN_LED2);
 led led3(PIN_LED3);
 
 HX711 loadcell, ex1;
-#define PIN_LOADCELL_DOUT 32
-#define PIN_LOADCELL_SCK 33
+#define PIN_LOADCELL_DOUT 33
+#define PIN_LOADCELL_SCK 32
 #define PIN_EX1_DOUT 25
 #define PIN_EX1_SCK 26
+#define LOADCELL_READINGS 10
 const uint32_t LOADCELL_OFFSET = 50682624;  // tare raw value
 const uint32_t LOADCELL_DIVIDER = 5895655;  // raw to N conversion value
 float loadcell_hz = 1;
@@ -333,6 +334,7 @@ void modeManager(void * parameter)
             {
               ledcmd(LED_AUTO_UP);
               if (!serial_matlab) Serial.println("Calibrating up...");
+              float speed_old = mainframe.getSpeed();
               mainframe.setSpeed(SPEED_4);
               mainframe.setSteppers(0);
               //mainframe.setDelay(DELAY_MIN);  // max speed
@@ -392,6 +394,9 @@ void modeManager(void * parameter)
               }
               mainframe.stop(); // stop when switch is released
               //ulTaskNotifyTake(pdTRUE, portMAX_DELAY);  // wait for movement stop
+              // restore movement
+              mainframe.setSteppers(0);
+              mainframe.setSpeed(speed_old);
               ledcmd(LED_OK);
               if (!serial_matlab) Serial.println("Calibration complete!");
             }
@@ -400,6 +405,7 @@ void modeManager(void * parameter)
             {
               ledcmd(LED_AUTO_DOWN);
               if (!serial_matlab) Serial.println("Calibrating down...");
+              float speed_old = mainframe.getSpeed();
               mainframe.setSpeed(SPEED_4);
               mainframe.setSteppers(0);
               mainframe.down();
@@ -457,6 +463,9 @@ void modeManager(void * parameter)
               }
               mainframe.stop(); // stop when switch is released
               //ulTaskNotifyTake(pdTRUE, portMAX_DELAY);  // wait for movement stop
+              // restore movement
+              mainframe.setSteppers(0);
+              mainframe.setSpeed(speed_old);
               ledcmd(LED_OK);
               if (!serial_matlab) Serial.println("Calibration complete!");
             }
@@ -793,6 +802,46 @@ void serialComm(void * parameter)
               else  // jiggle 0 stops the steppers
               {
                 mainframe.stop();
+              }
+              ledcmd(LED_OK);
+            }
+            break;
+          case 'F': // loadcell force configuration has been sent
+            {
+              cmd_int = cmdtoi(cmd);
+              uint8_t integer = cmd_int;
+              switch (integer)
+              {
+                case 0: // tare
+                {
+                  loadcell.tare();
+                }
+                break;
+                case 1: // read
+                {
+                  Serial.print("Get units: \t\t");
+                  Serial.println(loadcell.get_units(LOADCELL_READINGS), 1);
+                }
+                break;
+              }
+              ledcmd(LED_OK);
+            }
+            break;
+            case 'L': // loadcell calibration factor has been sent
+            {
+              cmd_int = cmdtoi(cmd);
+              uint8_t integer = cmd_int;
+              switch (integer)
+              {
+                case 0: // no value set
+                {
+                  loadcell.set_scale();
+                }
+                break;
+                default:
+                {
+                  loadcell.set_scale(cmd_int);
+                }
               }
               ledcmd(LED_OK);
             }

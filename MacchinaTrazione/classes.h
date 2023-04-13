@@ -44,10 +44,10 @@
 #define SPEED_4 55 // this is max speed with delay 1ms
 
 // input configuration
-#define PIN_ENDSTOP_1 19  // TODO check pins
-#define PIN_ENDSTOP_2 21
-#define PIN_ENDSTOP_3 22
-#define PIN_ENDSTOP_4 23
+#define PIN_ENDSTOP_1 23  // TODO check pins
+#define PIN_ENDSTOP_2 22
+#define PIN_ENDSTOP_3 21
+#define PIN_ENDSTOP_4 19
 //#define PIN_MANUAL 5
 //#define PIN_CONFIRM 6
 #define PIN_SPEED 35
@@ -55,8 +55,8 @@
 #define PIN_DOWN 36
 #define PIN_ALT 34
 // output configuration
-#define PIN_STEPA 17  // step A enable
-#define PIN_STEPB 5  // step B enable
+#define PIN_STEPA 5  // step A enable
+#define PIN_STEPB 17  // step B enable
 #define PIN_STEP 18 // step command
 #define PIN_DIR 16 // do not need 2 direction pins as asymmetric movement is not planned
 #define PIN_LED1 2 // green top led
