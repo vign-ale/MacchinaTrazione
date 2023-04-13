@@ -44,7 +44,7 @@
 #define SPEED_4 55 // this is max speed with delay 1ms
 
 // input configuration
-#define PIN_ENDSTOP_1 19
+#define PIN_ENDSTOP_1 19  // TODO check pins
 #define PIN_ENDSTOP_2 21
 #define PIN_ENDSTOP_3 22
 #define PIN_ENDSTOP_4 23
