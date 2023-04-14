@@ -1,4 +1,4 @@
-#include "classes.h"
+#include "definitions.h"
 
 // class frame
 // {
@@ -164,7 +164,8 @@ void frame::setDelay(uint32_t step_delay_new)
     if (step_delay_new != _step_delay)
     {
       _step_delay = step_delay_new;
-      float speed_new = (1000000 / _step_delay) * (60 / steps_per_mm);
+      uint32_t speed_step_delay = _step_delay + pulse_length;
+      float speed_new = (1000000 / speed_step_delay) * (60 / steps_per_mm);
       _speed = speed_new;
       if (!serial_matlab) Serial.println((String)"Delay stepper: "+_step_delay+" Speed: "+_speed);
     }

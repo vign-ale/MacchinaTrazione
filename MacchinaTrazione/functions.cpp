@@ -1,5 +1,4 @@
-#include "classes.h"
-
+#include "definitions.h"
 
 void step()
 {
@@ -7,33 +6,6 @@ void step()
   delayMicroseconds(pulse_length);
   digitalWrite(PIN_STEP, LOW);
   test_steps ++;
-  //if (!serial_matlab) Serial.println((String)"Steps cleared: "+test_steps);
-  // switch (stepper)
-  // {
-  //   case 0: // both steppers active
-  //   { 
-  //     // NOTE: digitalWrite funtion is not fast to execute, but the delay should be << compared to pulse_lenght
-  //     // this means there is a slight asymmetry and delay between the right and left steppers, but it should not be an issue
-  //     // TODO: check if it's really an issue or not
-  //     digitalWrite(PIN_STEPA, HIGH);
-  //     digitalWrite(PIN_STEPB, HIGH);
-  //     delayMicroseconds(pulse_length);
-  //     digitalWrite(PIN_STEPA, LOW);
-  //     digitalWrite(PIN_STEPB, LOW);
-  //   }
-  //   case 1: // stepper A active
-  //   {
-  //     digitalWrite(PIN_STEPA, HIGH);
-  //     delayMicroseconds(pulse_length);
-  //     digitalWrite(PIN_STEPA, LOW);
-  //   }
-  //   case 2: // stepper B active
-  //   {
-  //     digitalWrite(PIN_STEPB, HIGH);
-  //     delayMicroseconds(pulse_length);
-  //     digitalWrite(PIN_STEPB, LOW);
-  //   }
-  // }
 }
 
 void teststart()
@@ -91,4 +63,22 @@ float cmdtoi(char *cmd)
   }
   float cmd_int = atof(cmd);
   return cmd_int;
+}
+
+uint32_t loadcellGetCal()
+{
+  memory.begin("loadcell", true);
+  uint32_t value = memory.getULong("calibration", 0);
+  memory.end();
+  if (!serial_matlab) Serial.println((String)"Read loadcell calibration factor: "+value);
+  return value;
+}
+
+void loadcellSetCal(uint32_t value)
+{
+  loadcell.set_scale(value);
+  memory.begin("loadcell", false);
+  memory.putULong("calibration", value);
+  memory.end();
+  if (!serial_matlab) Serial.println((String)"Set loadcell calibration factor: "+value);
 }

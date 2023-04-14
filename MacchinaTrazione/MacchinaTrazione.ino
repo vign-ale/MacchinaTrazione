@@ -1,5 +1,8 @@
-#include "classes.h"
+#include "definitions.h"
+//#include "classes.h"
+//#include "functions.h"
 
+Preferences memory;
 
 input endstops[4] = {{PIN_ENDSTOP_1, false}, {PIN_ENDSTOP_2, false}, {PIN_ENDSTOP_3, false}, {PIN_ENDSTOP_4, false}};
 input btn_up(PIN_UP, false);
@@ -8,14 +11,14 @@ led led1(PIN_LED1);
 led led2(PIN_LED2);
 led led3(PIN_LED3);
 
-HX711 loadcell, ex1;
+HX711 loadcell;
 #define PIN_LOADCELL_DOUT 33
 #define PIN_LOADCELL_SCK 32
-#define PIN_EX1_DOUT 25
-#define PIN_EX1_SCK 26
+//#define PIN_EX1_DOUT 25
+//#define PIN_EX1_SCK 26
 #define LOADCELL_READINGS 10
-const uint32_t LOADCELL_OFFSET = 50682624;  // tare raw value
-const uint32_t LOADCELL_DIVIDER = 5895655;  // raw to N conversion value
+//uint32_t LOADCELL_OFFSET = 50682624;  // tare raw value
+uint32_t loadcellCalValue;  // raw to N conversion value
 float loadcell_hz = 1;
 
 struct reading reading_last;
@@ -122,7 +125,8 @@ void setup()
   mainframe.init();
 
   loadcell.begin(PIN_LOADCELL_DOUT, PIN_LOADCELL_SCK);
-  loadcell.begin(PIN_EX1_DOUT, PIN_EX1_SCK);
+  loadcellCalValue = loadcellGetCal();
+  //loadcell.begin(PIN_EX1_DOUT, PIN_EX1_SCK);
   
   vTaskDelay(500);
   
@@ -272,10 +276,9 @@ void stepControl(void * parameter)
         default:  // case is not indef, move for predefined space
           {
             // speed can not be changed in this mode
+            if (!serial_matlab) Serial.println((String)"Steps to go: "+steps);
             while (!ulTaskNotifyTake(pdTRUE, 0) && steps > 0)
             {
-              if (!serial_matlab) Serial.println((String)"Steps to go: "+steps);
-
               step();
 
               delayMicroseconds(step_delay_micros);
@@ -819,8 +822,12 @@ void serialComm(void * parameter)
                 break;
                 case 1: // read
                 {
-                  Serial.print("Get units: \t\t");
+                  Serial.print("Loadcell value: ");
                   Serial.println(loadcell.get_units(LOADCELL_READINGS), 1);
+                }
+                default:
+                {
+                  Serial.println("Unknown command!");
                 }
                 break;
               }
@@ -830,7 +837,7 @@ void serialComm(void * parameter)
             case 'L': // loadcell calibration factor has been sent
             {
               cmd_int = cmdtoi(cmd);
-              uint8_t integer = cmd_int;
+              uint32_t integer = cmd_int;
               switch (integer)
               {
                 case 0: // no value set
@@ -840,7 +847,7 @@ void serialComm(void * parameter)
                 break;
                 default:
                 {
-                  loadcell.set_scale(cmd_int);
+                  loadcellSetCal(integer);
                 }
               }
               ledcmd(LED_OK);
