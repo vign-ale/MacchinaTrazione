@@ -19,6 +19,8 @@
 
 #define MOVE_INDEF 0
 
+#define LOADCELL_READINGS 10
+
 #define LED_OFF 0
 #define LED_ERROR 1
 #define LED_OK 2
@@ -45,12 +47,12 @@
 #define PIN_ENDSTOP_2 23
 #define PIN_ENDSTOP_3 19
 #define PIN_ENDSTOP_4 21
-//#define PIN_MANUAL 5
-//#define PIN_CONFIRM 6
 #define PIN_SPEED 35
 #define PIN_UP 39
 #define PIN_DOWN 36
 #define PIN_ALT 34
+#define PIN_LOADCELL_DOUT 33
+#define PIN_LOADCELL_SCK 32
 // output configuration
 #define PIN_STEPA 5  // step A enable
 #define PIN_STEPB 17  // step B enable
@@ -67,7 +69,7 @@ struct reading
   uint16_t speed; // in 0.01 mm/min
   uint32_t timestamp; // millis
   uint16_t force; // in 0.1N
-  uint16_t ex1; // in microm
+  uint16_t position; // in microm
 };
 
 // CLASSES
@@ -141,6 +143,7 @@ class led
 // FUNCTIONS
 void step();
 void teststart();
+void teststart(float frequency);
 void testend();
 void ledcmd(uint8_t code);
 float cmdtoi(char *cmd);
@@ -158,8 +161,8 @@ extern float loadcell_hz;
 extern struct reading reading_last;
 extern float force_current;  // value in N
 extern float force_target;
-extern float ex1_current;  // value in ?
-extern float ex1_target;
+extern float position_current;  // value in ?
+extern float position_target;
 extern float move_target_microm;
 
 extern uint16_t millis_elapsed;

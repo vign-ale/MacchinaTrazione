@@ -8,14 +8,43 @@ void step()
   test_steps ++;
 }
 
-void teststart()
+void teststart(float frequency)
 {
   ledcmd(LED_3);
-  loadcell_hz = 10;
-  vTaskDelay(2000);
+  loadcell_hz = frequency;
+  vTaskDelay(1000);
   ledcmd(LED_AUTO_UP);
   test_millis_start = millis();
   test_steps = 0;
+  //if (!serial_matlab) Serial.println((String)"\n--- OK ---");
+  //else Serial.println((String)"\n--- ERR ---");
+  if (!serial_matlab)
+  {
+    Serial.println((String)"\n--- INIZIO TEST ---");
+    Serial.println((String)"Tempo: "+(millis() - test_millis_start));
+    uint8_t test_type = mainframe.getMode();
+    switch (test_type)
+    {
+      case MODE_WEIGHT:
+      {
+        Serial.println((String)"Forza richiesta: "+force_target+"\n");
+      }
+      break;
+      case MODE_LENGTH:
+      {
+        Serial.println((String)"Step richiesti: "+(position_target * steps_per_microm)+"\n");
+      }
+      break;
+      default:
+      {
+        Serial.println((String)"Errore modalità test!\n");
+      }
+    }
+  }
+}
+void teststart()
+{
+  teststart(10);  // default test frequency
 }
 
 void testend()
@@ -27,18 +56,18 @@ void testend()
   reading_end.speed = reading_last.speed;
   reading_end.timestamp = millis() - test_millis_start;
   reading_end.force = reading_last.force;
-  reading_end.ex1 = test_steps / steps_per_microm;
+  reading_end.position = test_steps / steps_per_microm;
 
   xQueueSend(RTOS_readings_queue, &reading_end, portMAX_DELAY);
   ledcmd(LED_3);
 
   if (!serial_matlab)
   {
-    Serial.println((String)"--- RISULTATI TEST ---");
+    Serial.println((String)"\n--- RISULTATI TEST ---");
     Serial.println((String)"Tempo: "+reading_end.timestamp);
     Serial.println((String)"Step finali: "+test_steps);
     Serial.println((String)"Forza finale: "+reading_end.force);
-    Serial.println((String)"Estensione finale: "+reading_end.ex1);
+    Serial.println((String)"Estensione finale: "+reading_end.position+"\n");
   }
 
   vTaskDelay(2000);
@@ -49,10 +78,10 @@ void testend()
 
 void ledcmd(uint8_t code)
 {
+  //if (!serial_matlab) Serial.println((String)"Led richiesto: "+code);
   xTaskNotifyGive(RTOS_ledManager_handle);  // clears any previous cmd
   xQueueSend(RTOS_ledManager_queue, &code, 0);
 }
-
 
 float cmdtoi(char *cmd)
 {

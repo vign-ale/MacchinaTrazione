@@ -22,8 +22,6 @@
 void frame::init()
 {
   setMode(0);  // start in manual mode
-  // _moving = false;
-  // _stop = false;
   setSteppers(0);
   setSpeed(20);
 }
@@ -312,7 +310,7 @@ void input::read()
     if (_state == false)
     {
       _justPressed = true;
-      if (!serial_matlab) Serial.println("Input pressed");
+      //if (!serial_matlab) Serial.println("Input pressed");
     }
     _state = true;
   }
@@ -321,7 +319,7 @@ void input::read()
     if (_state == true)
     {
       _justReleased = true;
-      if (!serial_matlab) Serial.println("Input released");
+      //if (!serial_matlab) Serial.println("Input released");
     }
     _state = false;
   }

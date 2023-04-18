@@ -12,21 +12,16 @@ led led2(PIN_LED2);
 led led3(PIN_LED3);
 
 HX711 loadcell;
-#define PIN_LOADCELL_DOUT 33
-#define PIN_LOADCELL_SCK 32
-//#define PIN_EX1_DOUT 25
-//#define PIN_EX1_SCK 26
-#define LOADCELL_READINGS 10
 //uint32_t LOADCELL_OFFSET = 50682624;  // tare raw value
 uint32_t loadcellCalValue;  // raw to N conversion value
 float loadcell_hz = 1;
 
 struct reading reading_last;
-float force_current = 0;  // value in 0.1N
-float force_target = 0;
-float ex1_current = 0;  // value in ?
-float ex1_target = 0;
-float move_target_microm = 1000;
+//float force_current = 0;  // value in 0.1N
+float force_target = 1000;
+//float position_current = 0;  // value in ?
+float position_target = 1000;
+//float move_target_microm = 1000;
 
 uint16_t millis_elapsed;
 
@@ -41,7 +36,8 @@ uint32_t test_millis_start = 0;
 uint32_t test_steps = 0;
 
 // serial configuration
-bool serial_matlab = false;
+bool serial_matlab = true;
+bool serial_telemetry = false;
 
 
 // RTOS stuff
@@ -58,8 +54,8 @@ QueueHandle_t RTOS_readings_queue;
 TaskHandle_t RTOS_limitCheck_handle;
 
 // here we use an ISR to activate a task that runs checkLimit
-// the task is not used elsewhere as it is better to make it run in other task
-// this way we are always sure the checkLimit ended before anything else happens in the task
+// limitCheck task is not used elsewhere as it is better to run checkLimit in the appropriate context
+// this way we are always sure checkLimit endas before anything else happens in the task
 // in this case we come from an ISR so the task has really high priority and will be run ASAP
 void IRAM_ATTR endstop_trigger()
 {
@@ -69,25 +65,12 @@ void IRAM_ATTR endstop_trigger()
   portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
 }
 
-void limitCheck(void * parameter)
-{
-  for (;;)
-  {
-    ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
-    mainframe.checkLimit();
-  }
-}
-
-//void IRAM_ATTR endstop_trigger()
-//{
-//  mainframe.checkLimit();
-//}
-
+// emergency stop with red button
 void IRAM_ATTR emergency_trigger()
 {
   // this means we have called and abort command
   // restarting ESP is the only way to make sure we terminate every task
-  ets_printf("EMERGENCY STOP!\nRebooting, see you soon!\n");
+  if (!serial_matlab) ets_printf("EMERGENCY STOP!\nRebooting, see you soon!\n");
   ESP.restart();
 }
 
@@ -112,7 +95,7 @@ void setup()
   //  &time_display_update_handle      // Task handle
   //  );
 
-  Serial.print("Mainframe initalization...\n");
+  if (!serial_matlab) Serial.print("Mainframe initalization...\n");
   pinMode(PIN_STEP, OUTPUT);
   pinMode(PIN_STEPA, OUTPUT);
   pinMode(PIN_STEPB, OUTPUT);
@@ -126,16 +109,13 @@ void setup()
 
   loadcell.begin(PIN_LOADCELL_DOUT, PIN_LOADCELL_SCK);
   loadcellCalValue = loadcellGetCal();
-  //loadcell.begin(PIN_EX1_DOUT, PIN_EX1_SCK);
   
   vTaskDelay(500);
   
-  Serial.print("Tasks initalization...\n");
+  if (!serial_matlab) Serial.print("Tasks initalization...\n");
   RTOS_modeManager_queue = xQueueCreate(4, sizeof(uint8_t));
   RTOS_stepControl_queue = xQueueCreate(4, sizeof(uint32_t));
   RTOS_readings_queue = xQueueCreate(100, sizeof(struct reading));
-  //RTOS_force_queue = xQueueCreate(100, sizeof(reading));
-  //RTOS_ex1_queue = xQueueCreate(100, sizeof(reading));
 
   xTaskCreate(stepControl, "Step controller", 3000, NULL, 10, &RTOS_stepControl_handle);
   xTaskCreate(limitCheck, "ISR limitCheck", 1000, NULL, 9, &RTOS_limitCheck_handle);
@@ -159,13 +139,21 @@ void setup()
   vTaskDelay(500);
   
   // notify setup ended
-  Serial.println("All done! Hello.\n");
+  if (!serial_matlab) Serial.println("All done! Hello.\n");
   ledcmd(LED_OK);
 }
-
 // loop has idle task hook, it runs when nothing else is going on
 // left empty to allow resource cleanup
 void loop() {}
+
+void limitCheck(void * parameter)
+{
+  for (;;)
+  {
+    ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+    mainframe.checkLimit();
+  }
+}
 
 void stepControl(void * parameter)
 {
@@ -287,7 +275,11 @@ void stepControl(void * parameter)
             }
           }
       }
-      if (!serial_matlab) Serial.println("Stop");
+      if (!serial_matlab) Serial.println("Stop!");
+    }
+    else
+    {
+      if (!serial_matlab) Serial.println("Movement is not allowed in this direction!");
     }
     // always disable all drivers
     digitalWrite(PIN_STEPA, HIGH);
@@ -308,172 +300,174 @@ void modeManager(void * parameter)
       {
         // this is not needed because we can only get here with mainframe.setMode, mode is for sure updated
         //mainframe.setMode(mode); // set mainframe mode
+        ulTaskNotifyTake(pdTRUE, 0);  // clear previous stop notifications
         switch (mode)
         {
           // test modes
           case MODE_WEIGHT:
+          {
+            teststart();
+            mainframe.up(position_target);
+            while (reading_last.force < force_target)
             {
-              teststart();
-              vTaskDelay(5000);
-              testend();
+              vTaskDelay(1);
             }
-            break;
+            //vTaskDelay(5000); //todo add stop on weight
+            testend();
+          }
+          break;
           case MODE_LENGTH:
-            {
-              teststart();
-              if (!serial_matlab)
-              {
-                Serial.println((String)"--- INIZIO TEST ---");
-                Serial.println((String)"Tempo: "+(millis() - test_millis_start));
-                Serial.println((String)"Step richiesti: "+(move_target_microm * steps_per_microm));
-              }
-              mainframe.up(move_target_microm);
-              ulTaskNotifyTake(pdTRUE, portMAX_DELAY);  // wait for movement stop
-              testend();
-            }
-            break;
-            // utility modes
+          {
+            teststart();
+            mainframe.up(position_target);
+            ulTaskNotifyTake(pdTRUE, portMAX_DELAY);  // wait for movement stop due to steps taken
+            testend();
+          }
+          break;
+          // utility modes  
           case MODE_CAL_UP:
+          {
+            ledcmd(LED_AUTO_UP);
+            if (!serial_matlab) Serial.println("Calibrating up...");
+            float speed_old = mainframe.getSpeed();
+            mainframe.setSpeed(SPEED_4);
+            mainframe.setSteppers(0);
+            //mainframe.setDelay(DELAY_MIN);  // max speed
+            mainframe.up();
+            while (mainframe.cgUp())
             {
-              ledcmd(LED_AUTO_UP);
-              if (!serial_matlab) Serial.println("Calibrating up...");
-              float speed_old = mainframe.getSpeed();
-              mainframe.setSpeed(SPEED_4);
-              mainframe.setSteppers(0);
-              //mainframe.setDelay(DELAY_MIN);  // max speed
-              mainframe.up();
-              while (mainframe.cgUp())
-              {
-                vTaskDelay(1); // check every ms if limit is reached
-              }
-              mainframe.stop();
-              //ulTaskNotifyTake(pdTRUE, portMAX_DELAY);  // wait for movement stop
-
-              // now upper limit is reached, an endstop is pressed
-              // reach the other limit
-              if (endstops[0].isPressed())
-              {
-                mainframe.setSteppers(2); // enable B stepper
-                if (!serial_matlab) Serial.println("Limit reached left...");
-              }
-              else if (endstops[1].isPressed())
-              {
-                mainframe.setSteppers(1); // enable A stepper
-                if (!serial_matlab) Serial.println("Limit reached right...");
-              }
-              else // should never get here
-              {
-                if (!serial_matlab) Serial.println("Error in limit determination!");
-              }
-              // move the correct stepper
-              mainframe.up();
-              while (mainframe.cgUp())
-              {
-                vTaskDelay(1); // check every ms if limit is reached
-              }
-              mainframe.stop();
-              //ulTaskNotifyTake(pdTRUE, portMAX_DELAY);  // wait for movement stop
-              if (!serial_matlab) Serial.println("Limit reached both...");
-
-              // now both sides have been pressed
-              // slow down, reverse and level slowly
-              mainframe.setSpeed(SPEED_2);
-              if (!serial_matlab) Serial.println("Levelling left...");
-              mainframe.setSteppers(1);
-              mainframe.down();
-              while (!mainframe.cgUp())
-              {
-                vTaskDelay(1);
-              }
-              mainframe.stop(); // stop when switch is released
-              //ulTaskNotifyTake(pdTRUE, portMAX_DELAY);  // wait for movement stop
-              // now other stepper
-              if (!serial_matlab) Serial.println("Levelling right...");
-              mainframe.setSteppers(2);
-              mainframe.down();
-              while (!mainframe.cgUp())
-              {
-                vTaskDelay(1);
-              }
-              mainframe.stop(); // stop when switch is released
-              //ulTaskNotifyTake(pdTRUE, portMAX_DELAY);  // wait for movement stop
-              // restore movement
-              mainframe.setSteppers(0);
-              mainframe.setSpeed(speed_old);
-              ledcmd(LED_OK);
-              if (!serial_matlab) Serial.println("Calibration complete!");
+              vTaskDelay(1); // check every ms if limit is reached
             }
-            break;
+            mainframe.stop();
+            //ulTaskNotifyTake(pdTRUE, portMAX_DELAY);  // wait for movement stop
+
+            // now upper limit is reached, an endstop is pressed
+            // reach the other limit
+            if (endstops[0].isPressed())
+            {
+              mainframe.setSteppers(2); // enable B stepper
+              if (!serial_matlab) Serial.println("Limit reached left...");
+            }
+            else if (endstops[1].isPressed())
+            {
+              mainframe.setSteppers(1); // enable A stepper
+              if (!serial_matlab) Serial.println("Limit reached right...");
+            }
+            else // should never get here
+            {
+              if (!serial_matlab) Serial.println("Error in limit determination!");
+            }
+            // move the correct stepper
+            mainframe.up();
+            while (mainframe.cgUp())
+            {
+              vTaskDelay(1); // check every ms if limit is reached
+            }
+            mainframe.stop();
+            //ulTaskNotifyTake(pdTRUE, portMAX_DELAY);  // wait for movement stop
+            if (!serial_matlab) Serial.println("Limit reached both...");
+
+            // now both sides have been pressed
+            // slow down, reverse and level slowly
+            mainframe.setSpeed(SPEED_2);
+            if (!serial_matlab) Serial.println("Levelling left...");
+            mainframe.setSteppers(1);
+            mainframe.down();
+            while (!mainframe.cgUp())
+            {
+              vTaskDelay(1);
+            }
+            mainframe.stop(); // stop when switch is released
+            //ulTaskNotifyTake(pdTRUE, portMAX_DELAY);  // wait for movement stop
+            // now other stepper
+            if (!serial_matlab) Serial.println("Levelling right...");
+            mainframe.setSteppers(2);
+            mainframe.down();
+            while (!mainframe.cgUp())
+            {
+              vTaskDelay(1);
+            }
+            mainframe.stop(); // stop when switch is released
+            //ulTaskNotifyTake(pdTRUE, portMAX_DELAY);  // wait for movement stop
+            // restore movement
+            mainframe.setSteppers(0);
+            mainframe.setSpeed(speed_old);
+            ledcmd(LED_OK);
+            if (!serial_matlab) Serial.println("Calibration complete!");
+          }
+          break;
           case MODE_CAL_DOWN:
+          {
+            ledcmd(LED_AUTO_DOWN);
+            if (!serial_matlab) Serial.println("Calibrating down...");
+            float speed_old = mainframe.getSpeed();
+            mainframe.setSpeed(SPEED_4);
+            mainframe.setSteppers(0);
+            mainframe.down();
+            while (mainframe.cgDown())
             {
-              ledcmd(LED_AUTO_DOWN);
-              if (!serial_matlab) Serial.println("Calibrating down...");
-              float speed_old = mainframe.getSpeed();
-              mainframe.setSpeed(SPEED_4);
-              mainframe.setSteppers(0);
-              mainframe.down();
-              while (mainframe.cgDown())
-              {
-                vTaskDelay(1); // check every ms if limit is reached
-              }
-              mainframe.stop();
-              //ulTaskNotifyTake(pdTRUE, portMAX_DELAY);  // wait for movement stop
-
-              // now lower limit is reached, an endstop is pressed
-              // reach the other limit
-              if (endstops[2].isPressed())
-              {
-                mainframe.setSteppers(2); // enable B stepper
-                if (!serial_matlab) Serial.println("Limit reached left...");
-              }
-              else if (endstops[3].isPressed())
-              {
-                mainframe.setSteppers(1); // enable A stepper
-                if (!serial_matlab) Serial.println("Limit reached right...");
-              }
-              else // should never get here
-              {
-                if (!serial_matlab) Serial.println("Error in limit determination!");
-              }
-              // move the correct stepper
-              mainframe.down();
-              while (mainframe.cgDown())
-              {
-                vTaskDelay(1); // check every ms if limit is reached
-              }
-              mainframe.stop();
-              //ulTaskNotifyTake(pdTRUE, portMAX_DELAY);  // wait for movement stop
-              if (!serial_matlab) Serial.println("Limit reached both...");
-
-              // now both sides have been pressed
-              // slow down, reverse and level slowly
-              mainframe.setSpeed(SPEED_2);
-              if (!serial_matlab) Serial.println("Levelling left...");
-              mainframe.setSteppers(1);
-              mainframe.up();
-              while (!mainframe.cgDown())
-              {
-                vTaskDelay(1);
-              }
-              mainframe.stop(); // stop when switch is released
-              //ulTaskNotifyTake(pdTRUE, portMAX_DELAY);  // wait for movement stop
-              // now other stepper
-              mainframe.setSteppers(2);
-              mainframe.up();
-              while (!mainframe.cgDown())
-              {
-                vTaskDelay(1);
-              }
-              mainframe.stop(); // stop when switch is released
-              //ulTaskNotifyTake(pdTRUE, portMAX_DELAY);  // wait for movement stop
-              // restore movement
-              mainframe.setSteppers(0);
-              mainframe.setSpeed(speed_old);
-              ledcmd(LED_OK);
-              if (!serial_matlab) Serial.println("Calibration complete!");
+              vTaskDelay(1); // check every ms if limit is reached
             }
-            break;
-          //default:  // default means we are either in manual or not recognized mode, exit from switch and enter manual mode
+            mainframe.stop();
+            //ulTaskNotifyTake(pdTRUE, portMAX_DELAY);  // wait for movement stop
+
+            // now lower limit is reached, an endstop is pressed
+            // reach the other limit
+            if (endstops[2].isPressed())
+            {
+              mainframe.setSteppers(2); // enable B stepper
+              if (!serial_matlab) Serial.println("Limit reached left...");
+            }
+            else if (endstops[3].isPressed())
+            {
+              mainframe.setSteppers(1); // enable A stepper
+              if (!serial_matlab) Serial.println("Limit reached right...");
+            }
+            else // should never get here
+            {
+              if (!serial_matlab) Serial.println("Error in limit determination!");
+            }
+            // move the correct stepper
+            mainframe.down();
+            while (mainframe.cgDown())
+            {
+              vTaskDelay(1); // check every ms if limit is reached
+            }
+            mainframe.stop();
+            //ulTaskNotifyTake(pdTRUE, portMAX_DELAY);  // wait for movement stop
+            if (!serial_matlab) Serial.println("Limit reached both...");
+
+            // now both sides have been pressed
+            // slow down, reverse and level slowly
+            mainframe.setSpeed(SPEED_2);
+            if (!serial_matlab) Serial.println("Levelling left...");
+            mainframe.setSteppers(1);
+            mainframe.up();
+            while (!mainframe.cgDown())
+            {
+              vTaskDelay(1);
+            }
+            mainframe.stop(); // stop when switch is released
+            //ulTaskNotifyTake(pdTRUE, portMAX_DELAY);  // wait for movement stop
+            // now other stepper
+            mainframe.setSteppers(2);
+            mainframe.up();
+            while (!mainframe.cgDown())
+            {
+              vTaskDelay(1);
+            }
+            mainframe.stop(); // stop when switch is released
+            //ulTaskNotifyTake(pdTRUE, portMAX_DELAY);  // wait for movement stop
+            // restore movement
+            mainframe.setSteppers(0);
+            mainframe.setSpeed(speed_old);
+            ledcmd(LED_OK);
+            if (!serial_matlab) Serial.println("Calibration complete!");
+          }
+          break;
+          default:  // default means we are either in manual or not recognized mode, exit from switch and enter manual mode
+            if (!serial_matlab) Serial.println("Unrecognized automatic mode, switching to manual!");
+          break;
         }
         mainframe.setMode(MODE_MANUAL); // always set manual mode after executing automatic mode test
       }
@@ -574,8 +568,8 @@ void modeManager(void * parameter)
 void dataReader(void * parameter)
 {
   TickType_t xLastWakeTime = xTaskGetTickCount();
-  TickType_t xFrequency = 1000/loadcell_hz;
-  //float data_raw;
+  uint16_t reading_millis = 1000/loadcell_hz;
+  TickType_t xFrequency = reading_millis;
 
   // struct reading
   // {
@@ -583,20 +577,21 @@ void dataReader(void * parameter)
   //   uint16_t speed; // in micron/min
   //   uint32_t timestamp; // millis
   //   uint16_t force; // in 0.1N
-  //   uint16_t ex1; // in micron
+  //   uint16_t position; // in micron
   // }
 
   struct reading reading_current;
   for (;;)
   {
-    xFrequency = 1000/loadcell_hz;
+    reading_millis = 1000/loadcell_hz;
+    xFrequency = reading_millis;
     vTaskDelayUntil(&xLastWakeTime, xFrequency);
     reading_current.mode = mainframe.getMode();
-    reading_current.speed = round(mainframe.getSpeed() * 100);
+    reading_current.speed = round(mainframe.getSpeed() * 1000);
     reading_current.timestamp = millis() - test_millis_start;
-    //reading_last.force = round(loadcell.get_units(5) * 10);
+    //reading_current.force = round(loadcell.get_units(LOADCELL_READINGS) * 10);
     reading_current.force = 111;
-    reading_current.ex1 = test_steps / steps_per_microm;
+    reading_current.position = test_steps / steps_per_microm;
 
     reading_last = reading_current; // save changes to global variable
     xQueueSend(RTOS_readings_queue, &reading_current, 100);
@@ -637,11 +632,11 @@ void serialComm(void * parameter)
           force_target = cmd[3] * 256 + cmd[4];
           // byte 5,6 are extension
           // extension is passed in microm
-          ex1_target = cmd[5] * 256 + cmd[6];
+          position_target = cmd[5] * 256 + cmd[6];
           // we can use extension but it is only relative
           // we use target in steps because it is the only thing we can measure
           // BEWARE we have no way to know is there are skipped steps, it is only a target
-          move_target_microm = ex1_target;
+          //move_target_microm = position_target; // should not be needed
           ledcmd(LED_OK);
           // send ack again to matlab after a while
           vTaskDelay(10);
@@ -672,7 +667,7 @@ void serialComm(void * parameter)
         {
           ledcmd(LED_OK);
           serial_matlab = false;
-          Serial.println("Switching to manual command mode...");
+          Serial.println("\nSwitching to manual command mode...");
           // clear buffer
           while (Serial.available() > 0)
           {
@@ -853,6 +848,25 @@ void serialComm(void * parameter)
               ledcmd(LED_OK);
             }
             break;
+            case 'T': // telemetry data configuration has been sent
+            {
+              cmd_int = cmdtoi(cmd);
+              uint32_t integer = cmd_int;
+              switch (integer)
+              {
+                case 0: // off
+                {
+                  serial_telemetry = false;
+                }
+                break;
+                case 1: // on
+                {
+                  serial_telemetry = true;
+                }
+              }
+              ledcmd(LED_OK);
+            }
+            break;
           default:
             Serial.println("Unknown initalizer!");
         }
@@ -861,6 +875,7 @@ void serialComm(void * parameter)
         cmd_pos = 0;
       }
     }
+
     // transimt data
     while (xQueueReceive(RTOS_readings_queue, &reading_send, 0) == pdTRUE)
     {
@@ -883,9 +898,9 @@ void serialComm(void * parameter)
         uint32_t load_raw = reading_send.force;
         outByte[8] = (load_raw >> 8) & 0xFF;
         outByte[9] = (load_raw >> 0) & 0xFF;
-        uint32_t ex1_raw = reading_send.ex1;
-        outByte[10] = (ex1_raw >> 8) & 0xFF;
-        outByte[11] = (ex1_raw >> 0) & 0xFF;
+        uint32_t position_raw = reading_send.position;
+        outByte[10] = (position_raw >> 8) & 0xFF;
+        outByte[11] = (position_raw >> 0) & 0xFF;
 
         // send message
         vTaskPrioritySet(RTOS_serialComm_handle, 9);  // prevent task from interrupting while sending
@@ -894,11 +909,14 @@ void serialComm(void * parameter)
       }
       else
       {
-        // Serial.println("--- VALORI CORRENTI ---");
-        // Serial.println((String)"Speed: "+reading_send.speed/100);
-        // Serial.println((String)"Timestamp: "+reading_send.timestamp);
-        // Serial.println((String)"Force: "+reading_send.force);
-        // Serial.println((String)"Extension: "+reading_send.ex1);
+        if (serial_telemetry)
+        {
+          Serial.print((String)"VALORI CORRENTI:  Velocità: "+reading_send.speed/100);
+          Serial.print((String)"  Tempo: "+reading_send.timestamp);
+          Serial.print((String)"  Forza: "+reading_send.force);
+          Serial.println((String)"  Estensione: "+reading_send.position);
+        }
+        
       }
     }
   }
@@ -911,8 +929,7 @@ void ledManager(void * parameter)
   {
     xQueueReceive(RTOS_ledManager_queue, &cmd, portMAX_DELAY);
     ulTaskNotifyTake(pdTRUE, 0);  // clear previous notifications
-    //Serial.println((String)"Led: "+cmd);
-
+    //if (!serial_matlab) Serial.println((String)"Led: "+cmd);
     switch (cmd)
     {
       case LED_OFF:
