@@ -23,7 +23,6 @@ void frame::init()
 {
   setMode(0);  // start in manual mode
   setSteppers(0);
-  setSpeed(20);
 }
 
 void frame::up(uint32_t microm)
@@ -163,14 +162,14 @@ void frame::setDelay(uint32_t step_delay_new)
     {
       _step_delay = step_delay_new;
       uint32_t speed_step_delay = _step_delay + pulse_length;
-      float speed_new = (1000000 / speed_step_delay) * (60 / steps_per_mm);
+      float speed_new = ((float) 1000000 / speed_step_delay) * ((float) 60 / steps_per_mm);
       _speed = speed_new;
       if (!serial_matlab) Serial.println((String)"Delay stepper: "+_step_delay+" Speed: "+_speed);
     }
   }
 }
 
-void frame::setSpeed(uint16_t speed)
+void frame::setSpeed(float speed)
 {
   // sending speed 0 enables manual speed control
   // input speed is in mm/min
@@ -180,8 +179,9 @@ void frame::setSpeed(uint16_t speed)
   float delay_micros = 0;
   if (steps_second != 0)
   {
-    delay_micros = 1000000 / steps_second;  // (micros in s) / (steps each second)
-    delay_micros = round(delay_micros - pulse_length); // additional delay from pulse_length removed
+    delay_micros = (float) 1000000 / steps_second;  // (micros in s) / (steps each second)
+    delay_micros = delay_micros - pulse_length; // additional delay from pulse_length removed
+    delay_micros = round(delay_micros); // return int delay
 
     // prevents negative values from causing errors
     

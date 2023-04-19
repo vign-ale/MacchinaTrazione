@@ -30,7 +30,7 @@ frame mainframe;
 uint8_t pulse_length = 10;
 float steps_per_mm = 200 * 1 * 26.85 / 5; // Steps per rev * Microstepping * Gear reduction ratio / Pitch
 float steps_per_microm = 200 * 1 * 26.85 / 5000; // Steps per rev * Microstepping * Gear reduction ratio / Pitch
-uint8_t encoder_speed = 1;
+uint8_t encoder_speed = 0;
 bool speed_read_encoder = true;
 uint32_t test_millis_start = 0;
 uint32_t test_steps = 0;
@@ -487,8 +487,7 @@ void modeManager(void * parameter)
         if(encoder_speed_new != encoder_speed)
         {
           encoder_speed = encoder_speed_new;
-          
-          ;
+          mainframe.setSpeedInt(encoder_speed);
         }
       }
       
@@ -588,11 +587,11 @@ void dataReader(void * parameter)
     xFrequency = reading_millis;
     vTaskDelayUntil(&xLastWakeTime, xFrequency);
     reading_current.mode = mainframe.getMode();
-    reading_current.speed = round(mainframe.getSpeed() * 1000);
+    reading_current.speed = round(mainframe.getSpeed() * 100);
     reading_current.timestamp = millis() - test_millis_start;
     //reading_current.force = round(loadcell.get_units(LOADCELL_READINGS) * 10);
     reading_current.force = 111;
-    reading_current.position = test_steps / steps_per_microm;
+    reading_current.position = round(test_steps / steps_per_microm);
 
     reading_last = reading_current; // save changes to global variable
     xQueueSend(RTOS_readings_queue, &reading_current, 100);
@@ -821,6 +820,7 @@ void serialComm(void * parameter)
                   Serial.print("Loadcell value: ");
                   Serial.println(loadcell.get_units(LOADCELL_READINGS), 1);
                 }
+                break;
                 default:
                 {
                   Serial.println("Unknown command!");
@@ -912,7 +912,8 @@ void serialComm(void * parameter)
       {
         if (serial_telemetry)
         {
-          Serial.print((String)"VALORI CORRENTI:  Velocità: "+reading_send.speed/100);
+          float speed_com = reading_send.speed;
+          Serial.print((String)"VALORI CORRENTI:  Velocità: "+speed_com / 100);
           Serial.print((String)"  Tempo: "+reading_send.timestamp);
           Serial.print((String)"  Forza: "+reading_send.force);
           Serial.println((String)"  Estensione: "+reading_send.position);

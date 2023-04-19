@@ -19,7 +19,7 @@
 
 #define MOVE_INDEF 0
 
-#define LOADCELL_READINGS 10
+#define LOADCELL_READINGS 3
 
 #define LED_OFF 0
 #define LED_ERROR 1
@@ -95,7 +95,7 @@ class frame
     bool setMode(uint8_t mode_new);
     void setSteppers(uint8_t steppers);
     void setDelay(uint32_t delay);
-    void setSpeed(uint16_t speed);
+    void setSpeed(float speed);
     void setSpeedInt(uint8_t speed_int);
 
     uint8_t getMode();
