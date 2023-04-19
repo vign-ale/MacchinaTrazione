@@ -29,7 +29,7 @@ void frame::up(uint32_t microm)
 {
   _dir = true;
   uint32_t move_step = microm * steps_per_microm;
-  xQueueSend(RTOS_stepControl_queue, &move_step, 0);
+  xQueueSend(RTOS_stepControl_queue, &move_step, portMAX_DELAY);
 }
 
 void frame::up()

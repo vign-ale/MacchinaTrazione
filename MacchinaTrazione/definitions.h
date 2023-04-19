@@ -142,8 +142,8 @@ class led
 
 // FUNCTIONS
 void step(bool up);
-void teststart();
 void teststart(float frequency);
+void teststart();
 void testend();
 void ledcmd(uint8_t code);
 float cmdtoi(char *cmd);

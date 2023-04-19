@@ -17,11 +17,8 @@ uint32_t loadcellCalValue;  // raw to N conversion value
 float loadcell_hz = 1;
 
 struct reading reading_last;
-//float force_current = 0;  // value in 0.1N
-float force_target = 1000;
-//float position_current = 0;  // value in ?
-float position_target = 1000;
-//float move_target_microm = 1000;
+float force_target = 50;  // value in N
+float position_target = 1000; // value in microm
 
 uint16_t millis_elapsed;
 
@@ -77,7 +74,7 @@ void IRAM_ATTR emergency_trigger()
 void setup()
 {
   Serial.begin(115200);
-  Serial.println("\n\nBooting...");
+  Serial.println("\nBooting...");
   RTOS_ledManager_queue = xQueueCreate(4, sizeof(uint8_t));
   xTaskCreate(ledManager, "Led manager", 3000, NULL, 2, &RTOS_ledManager_handle);
   ledcmd(LED_ERROR);
@@ -95,7 +92,7 @@ void setup()
   //  &time_display_update_handle      // Task handle
   //  );
 
-  if (!serial_matlab) Serial.print("Mainframe initalization...\n");
+  Serial.println("Mainframe initalization...");
   pinMode(PIN_STEP, OUTPUT);
   pinMode(PIN_STEPA, OUTPUT);
   pinMode(PIN_STEPB, OUTPUT);
@@ -108,11 +105,15 @@ void setup()
   mainframe.init();
 
   loadcell.begin(PIN_LOADCELL_DOUT, PIN_LOADCELL_SCK);
-  loadcellCalValue = loadcellGetCal();
+  loadcellCalValue = loadcellGetCal();  // 22687 calibration for N
+  loadcell.set_scale(loadcellCalValue);
+  //loadcell.set_offset(273260);
+  loadcell.tare();
+  Serial.println((String)"Loadcell calibration factor: "+loadcellCalValue);
   
   vTaskDelay(500);
   
-  if (!serial_matlab) Serial.print("Tasks initalization...\n");
+  if (!serial_matlab) Serial.println("Tasks initalization...");
   RTOS_modeManager_queue = xQueueCreate(4, sizeof(uint8_t));
   RTOS_stepControl_queue = xQueueCreate(4, sizeof(uint32_t));
   RTOS_readings_queue = xQueueCreate(100, sizeof(struct reading));
@@ -167,7 +168,7 @@ void stepControl(void * parameter)
   {
     // we are using a queue to allow for different moving modes in future
     // also because multiple notification to task are NOT working (don't know why)
-    xQueueReceive(RTOS_stepControl_queue, &steps, portMAX_DELAY);
+    xQueueReceive(RTOS_stepControl_queue, &steps, portMAX_DELAY);  
     // notifications are used to stop
     ulTaskNotifyTake(pdTRUE, 0);  // clear previous stop notifications
 
@@ -306,19 +307,19 @@ void modeManager(void * parameter)
           // test modes
           case MODE_WEIGHT:
           {
-            teststart();
-            mainframe.up(position_target);
-            while (reading_last.force < force_target)
+            teststart(2);
+            mainframe.up();
+            while (reading_last.force / 10 < force_target)
             {
               vTaskDelay(1);
             }
-            //vTaskDelay(5000); //todo add stop on weight
+            mainframe.stop();
             testend();
           }
           break;
           case MODE_LENGTH:
           {
-            teststart();
+            teststart(2);
             mainframe.up(position_target);
             ulTaskNotifyTake(pdTRUE, portMAX_DELAY);  // wait for movement stop due to steps taken
             testend();
@@ -574,7 +575,7 @@ void dataReader(void * parameter)
   // struct reading
   // {
   //   uint8_t mode;
-  //   uint16_t speed; // in micron/min
+  //   uint16_t speed; // in mm*100/min
   //   uint32_t timestamp; // millis
   //   uint16_t force; // in 0.1N
   //   uint16_t position; // in micron
@@ -589,8 +590,7 @@ void dataReader(void * parameter)
     reading_current.mode = mainframe.getMode();
     reading_current.speed = round(mainframe.getSpeed() * 100);
     reading_current.timestamp = millis() - test_millis_start;
-    //reading_current.force = round(loadcell.get_units(LOADCELL_READINGS) * 10);
-    reading_current.force = 111;
+    reading_current.force = round(abs(loadcell.get_units(LOADCELL_READINGS)) * 10);
     reading_current.position = round(test_steps / steps_per_microm);
 
     reading_last = reading_current; // save changes to global variable
@@ -818,7 +818,7 @@ void serialComm(void * parameter)
                 case 1: // read
                 {
                   Serial.print("Loadcell value: ");
-                  Serial.println(loadcell.get_units(LOADCELL_READINGS), 1);
+                  Serial.println(loadcell.get_units(10), 6);
                 }
                 break;
                 default:
@@ -834,18 +834,7 @@ void serialComm(void * parameter)
             {
               cmd_int = cmdtoi(cmd);
               uint32_t integer = cmd_int;
-              switch (integer)
-              {
-                case 0: // no value set
-                {
-                  loadcell.set_scale();
-                }
-                break;
-                default:
-                {
-                  loadcellSetCal(integer);
-                }
-              }
+              loadcellSetCal(integer);
               ledcmd(LED_OK);
             }
             break;
@@ -915,7 +904,8 @@ void serialComm(void * parameter)
           float speed_com = reading_send.speed;
           Serial.print((String)"VALORI CORRENTI:  Velocità: "+speed_com / 100);
           Serial.print((String)"  Tempo: "+reading_send.timestamp);
-          Serial.print((String)"  Forza: "+reading_send.force);
+          float force_com = reading_send.force;
+          Serial.print((String)"  Forza: "+force_com / 10);
           Serial.println((String)"  Estensione: "+reading_send.position);
         }
         

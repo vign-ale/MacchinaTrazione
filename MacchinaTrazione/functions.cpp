@@ -22,10 +22,8 @@ void teststart(float frequency)
   loadcell_hz = frequency;
   vTaskDelay(1000);
   ledcmd(LED_AUTO_UP);
-  test_millis_start = millis();
   test_steps = 0;
-  //if (!serial_matlab) Serial.println((String)"\n--- OK ---");
-  //else Serial.println((String)"\n--- ERR ---");
+  test_millis_start = millis();
   if (!serial_matlab)
   {
     Serial.println((String)"\n--- INIZIO TEST ---");
@@ -52,7 +50,7 @@ void teststart(float frequency)
 }
 void teststart()
 {
-  teststart(10);  // default test frequency
+  teststart(5);  // default test frequency
 }
 
 void testend()
@@ -61,10 +59,10 @@ void testend()
 
   // we can send a fake mode to MATLAB so it stops the test, even if mainframe is in another mode
   reading_end.mode = MODE_TESTEND;
-  reading_end.speed = reading_last.speed;
-  reading_end.timestamp = reading_last.timestamp;
-  reading_end.force = reading_last.force;
-  reading_end.position = reading_last.position;
+  reading_end.speed = round(mainframe.getSpeed() * 100);
+  reading_end.timestamp = millis() - test_millis_start;
+  reading_end.force = round(abs(loadcell.get_units(LOADCELL_READINGS)) * 10);
+  reading_end.position = round(test_steps / steps_per_microm);
 
   xQueueSend(RTOS_readings_queue, &reading_end, portMAX_DELAY);
   ledcmd(LED_3);
@@ -78,7 +76,7 @@ void testend()
     Serial.println((String)"Estensione finale: "+reading_end.position+"\n");
   }
 
-  vTaskDelay(2000);
+  vTaskDelay(1000);
   ledcmd(LED_OK);
   loadcell_hz = 1;
   speed_read_encoder = true;  // enable speed encoder
@@ -114,7 +112,14 @@ uint32_t loadcellGetCal()
 
 void loadcellSetCal(uint32_t value)
 {
-  loadcell.set_scale(value);
+  if (value == 0)
+  {
+    loadcell.set_scale();
+  }
+  else
+  {
+    loadcell.set_scale(value);
+  }
   memory.begin("loadcell", false);
   memory.putULong("calibration", value);
   memory.end();
