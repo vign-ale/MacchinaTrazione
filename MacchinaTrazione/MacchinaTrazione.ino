@@ -254,7 +254,7 @@ void stepControl(void * parameter)
                 if (!serial_matlab) Serial.println((String)"Delay: "+step_delay+" millis: "+step_delay_millis+" micros: "+step_delay_micros);
               }
 
-              step();
+              step(dir);
 
               delayMicroseconds(step_delay_micros);
               vTaskDelay(step_delay_millis);
@@ -267,7 +267,7 @@ void stepControl(void * parameter)
             if (!serial_matlab) Serial.println((String)"Steps to go: "+steps);
             while (!ulTaskNotifyTake(pdTRUE, 0) && steps > 0)
             {
-              step();
+              step(dir);
 
               delayMicroseconds(step_delay_micros);
               vTaskDelay(step_delay_millis);
@@ -487,7 +487,8 @@ void modeManager(void * parameter)
         if(encoder_speed_new != encoder_speed)
         {
           encoder_speed = encoder_speed_new;
-          mainframe.setSpeedInt(encoder_speed);
+          
+          ;
         }
       }
       
@@ -625,7 +626,7 @@ void serialComm(void * parameter)
           // byte 1,2 are speed
           // speed is passed in 0.01mm/min = 10 microm/min
           // divide by 100 to get mm/min
-          uint16_t speed_new = (cmd[1] * 256 + cmd[2]);
+          float speed_new = (cmd[1] * 256 + cmd[2]) / 100;
           speed_read_encoder = false; // disable speed encoder
           mainframe.setSpeed(speed_new);
           // byte 3,4 are force

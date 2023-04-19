@@ -1,11 +1,19 @@
 #include "definitions.h"
 
-void step()
+void step(bool up)
 {
   digitalWrite(PIN_STEP, HIGH);
   delayMicroseconds(pulse_length);
   digitalWrite(PIN_STEP, LOW);
-  test_steps ++;
+  if (up)
+  {
+    test_steps ++;
+  }
+  else if (test_steps > 0)  // do not allow negative postion
+  {
+    test_steps --;
+  }
+  
 }
 
 void teststart(float frequency)
@@ -54,9 +62,9 @@ void testend()
   // we can send a fake mode to MATLAB so it stops the test, even if mainframe is in another mode
   reading_end.mode = MODE_TESTEND;
   reading_end.speed = reading_last.speed;
-  reading_end.timestamp = millis() - test_millis_start;
+  reading_end.timestamp = reading_last.timestamp;
   reading_end.force = reading_last.force;
-  reading_end.position = test_steps / steps_per_microm;
+  reading_end.position = reading_last.position;
 
   xQueueSend(RTOS_readings_queue, &reading_end, portMAX_DELAY);
   ledcmd(LED_3);
@@ -74,6 +82,7 @@ void testend()
   ledcmd(LED_OK);
   loadcell_hz = 1;
   speed_read_encoder = true;  // enable speed encoder
+  mainframe.setSpeedInt(encoder_speed);
 }
 
 void ledcmd(uint8_t code)

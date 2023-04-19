@@ -141,7 +141,7 @@ class led
 };
 
 // FUNCTIONS
-void step();
+void step(bool up);
 void teststart();
 void teststart(float frequency);
 void testend();
