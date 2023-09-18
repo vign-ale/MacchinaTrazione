@@ -19,12 +19,22 @@ void step(bool up)
 void teststart(float frequency)
 {
   ledcmd(LED_3);
-  loadcell_hz = frequency;
-  vTaskDelay(1000);
-  ledcmd(LED_AUTO_UP);
   test_steps = 0;
   test_millis_start = millis();
-  if (!serial_matlab)
+  loadcell_hz = frequency;
+  if (serial_matlab)
+  {
+    struct reading reading_start;
+    // send first datapoint
+    reading_start.mode = mainframe.getMode();
+    reading_start.speed = round(mainframe.getSpeed() * 100);
+    reading_start.timestamp = millis() - test_millis_start;
+    reading_start.force = round(abs(loadcell.get_units(LOADCELL_READINGS)) * 10);
+    reading_start.position = round(test_steps / steps_per_microm);
+
+    xQueueSend(RTOS_readings_queue, &reading_start, portMAX_DELAY);
+  }
+  else
   {
     Serial.println((String)"\n--- INIZIO TEST ---");
     Serial.println((String)"Tempo: "+(millis() - test_millis_start));
@@ -47,6 +57,8 @@ void teststart(float frequency)
       }
     }
   }
+  vTaskDelay(1000); // wait for load value to stabilize before moving
+  ledcmd(LED_AUTO_UP);
 }
 void teststart()
 {

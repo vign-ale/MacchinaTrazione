@@ -19,7 +19,7 @@
 
 #define MOVE_INDEF 0
 
-#define LOADCELL_READINGS 3
+#define LOADCELL_READINGS 2
 
 #define LED_OFF 0
 #define LED_ERROR 1

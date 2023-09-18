@@ -307,7 +307,7 @@ void modeManager(void * parameter)
           // test modes
           case MODE_WEIGHT:
           {
-            teststart(2);
+            teststart();
             mainframe.up();
             while (reading_last.force / 10 < force_target)
             {
@@ -319,7 +319,7 @@ void modeManager(void * parameter)
           break;
           case MODE_LENGTH:
           {
-            teststart(2);
+            teststart();
             mainframe.up(position_target);
             ulTaskNotifyTake(pdTRUE, portMAX_DELAY);  // wait for movement stop due to steps taken
             testend();
@@ -582,7 +582,7 @@ void dataReader(void * parameter)
   // }
 
   struct reading reading_current;
-  for (;;)
+  for (;;)  // TODO add semaphore to stop data reading while changing mode
   {
     reading_millis = 1000/loadcell_hz;
     xFrequency = reading_millis;
@@ -595,7 +595,6 @@ void dataReader(void * parameter)
 
     reading_last = reading_current; // save changes to global variable
     xQueueSend(RTOS_readings_queue, &reading_current, 100);
-    //Serial.println("Sent reading...");
   }
 }
 
@@ -636,7 +635,6 @@ void serialComm(void * parameter)
           // we can use extension but it is only relative
           // we use target in steps because it is the only thing we can measure
           // BEWARE we have no way to know is there are skipped steps, it is only a target
-          //move_target_microm = position_target; // should not be needed
           ledcmd(LED_OK);
           // send ack again to matlab after a while
           vTaskDelay(10);
@@ -657,11 +655,6 @@ void serialComm(void * parameter)
           {
             mainframe.setMode(cmd[0]);
           }
-          // else
-          // {
-          //   // return wrong command
-          //   Serial.println("Wrong command length!");
-          // }
         }
         else if (inByte == SERIAL_MANUAL) // this is used to switch from MATLAB to serial via arduino serial monitor
         {
@@ -673,23 +666,7 @@ void serialComm(void * parameter)
           {
             inByte = Serial.read();
           }
-        }
-        // message was invalid, start searching again for start byte
-        // we do nothing because serial available restart whole loop
-
-
-        // --- DEPRECATED ---
-        // message was invalid, remove everyhting from buffer
-        // we remove everything because we aren't sure when next good message starts
-        // else
-        // {
-        //   //Serial.println((String)inByte+" is not a MATLAB start code");
-        //   // clear buffer
-        //   while (Serial.available() > 0)
-        //   {
-        //     inByte = Serial.read();
-        //   }
-        //  }       
+        }   
       }
       else  // serial monitor communication protocol
       {   
@@ -849,11 +826,26 @@ void serialComm(void * parameter)
                   serial_telemetry = false;
                 }
                 break;
-                case 1: // on
+                default: // on
                 {
                   serial_telemetry = true;
+                  loadcell_hz = integer;
                 }
               }
+              ledcmd(LED_OK);
+            }
+            break;
+            case 'N': // force target has been sent
+            {
+              cmd_int = cmdtoi(cmd);
+              force_target = cmd_int;
+              ledcmd(LED_OK);
+            }
+            break;
+            case 'E': // position target has been sent
+            {
+              cmd_int = cmdtoi(cmd);
+              position_target = cmd_int;
               ledcmd(LED_OK);
             }
             break;
@@ -878,8 +870,6 @@ void serialComm(void * parameter)
         uint16_t speed_raw = reading_send.speed;
         outByte[2] = (speed_raw >> 8) & 0xFF;
         outByte[3] = (speed_raw >> 0) & 0xFF;
-        // outByte[2] = (int8_t) speed_raw>>8;
-        // outByte[3] = (int8_t) speed_raw % pow(2, 8);
         uint32_t time_relative = reading_send.timestamp;
         outByte[4] = (time_relative >> 24) & 0xFF;
         outByte[5] = (time_relative >> 16) & 0xFF;
