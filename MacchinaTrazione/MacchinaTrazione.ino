@@ -172,11 +172,6 @@ void stepControl(void * parameter)
     // notifications are used to stop
     ulTaskNotifyTake(pdTRUE, 0);  // clear previous stop notifications
 
-    // this function can run for a very long time
-    // unsubscribe TWDT from idle task to prevent crash
-    //RTOS_idleTask_handle = xTaskGetIdleTaskHandle();
-    //esp_task_wdt_delete(RTOS_idleTask_handle);
-
     // get movement variables
     dir = mainframe.getDir();
     step_active = mainframe.getSteppers();
