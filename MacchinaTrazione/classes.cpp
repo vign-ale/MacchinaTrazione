@@ -1,4 +1,4 @@
-#include "classes.h"
+#include "definitions.h"
 
 // class frame
 // {
@@ -21,28 +21,32 @@
 
 void frame::init()
 {
-  _mode = 0;  // start in manual mode
-  // _moving = false;
-  // _stop = false;
-  _step_active = 0;
-  _step_delay = 100;
-  checkLimit();
+  setMode(0);  // start in manual mode
+  setSteppers(0);
+}
+
+void frame::up(uint32_t microm)
+{
+  _dir = true;
+  uint32_t move_step = microm * steps_per_microm;
+  xQueueSend(RTOS_stepControl_queue, &move_step, portMAX_DELAY);
 }
 
 void frame::up()
 {
-  _dir = true;
-  uint8_t move_mode = MOVE_INDEF;
-  xQueueSend(RTOS_stepControl_queue, &move_mode, 0);
+  up(MOVE_INDEF);
+}
+
+void frame::down(uint32_t microm)
+{
+  _dir = false;
+  uint32_t move_step = microm * steps_per_microm;
+  xQueueSend(RTOS_stepControl_queue, &move_step, 0);
 }
 
 void frame::down()
 {
-  Serial.println("Before queue");
-  _dir = false;
-  uint8_t move_mode = MOVE_INDEF;
-  xQueueSend(RTOS_stepControl_queue, &move_mode, 0);
-  Serial.println("After queue");
+  down(MOVE_INDEF);
 }
 
 void frame::stop()
@@ -146,32 +150,57 @@ void frame::setSteppers(uint8_t steppers)
   checkLimit();
 }
 
-void frame::setDelay(uint16_t step_delay)
+void frame::setDelay(uint32_t step_delay_new)
 {
-  if (step_delay < DELAY_MIN)
+  if (step_delay_new == 0)
   {
-    step_delay = DELAY_MIN;   
+    speed_read_encoder = true;
   }
-  if (step_delay != _step_delay)
+  else
   {
-    _step_delay = step_delay;
-    Serial.println((String)"Delay stepper: "+_step_delay);
+    if (step_delay_new != _step_delay)
+    {
+      _step_delay = step_delay_new;
+      uint32_t speed_step_delay = _step_delay + pulse_length;
+      float speed_new = ((float) 1000000 / speed_step_delay) * ((float) 60 / steps_per_mm);
+      _speed = speed_new;
+      if (!serial_matlab) Serial.println((String)"Delay stepper: "+_step_delay+" Speed: "+_speed);
+    }
   }
 }
 
 void frame::setSpeed(float speed)
 {
-  // inpuut speed is in mm/min
+  // sending speed 0 enables manual speed control
+  // input speed is in mm/min
   float steps_second = speed * steps_per_mm / 60;  // conversion to s from min
-  float delay_micros = 1000000 / steps_second;  // micros in s / steps each second
-  delay_micros = round(delay_micros - pulse_length); // additional delay from pulse_length removed
+  if (!serial_matlab) Serial.println((String)"Steps per second: "+steps_second);
 
-  // if delay is < pulse_length we would be for sure too fast
-  if (delay_micros < pulse_length)
+  float delay_micros = 0;
+  if (steps_second != 0)
   {
-    delay_micros = pulse_length;
+    delay_micros = (float) 1000000 / steps_second;  // (micros in s) / (steps each second)
+    delay_micros = delay_micros - pulse_length; // additional delay from pulse_length removed
+    delay_micros = round(delay_micros); // return int delay
+
+    // prevents negative values from causing errors
+    
   }
-  setDelay(delay_micros);
+  if (delay_micros >= DELAY_MIN || delay_micros == 0)
+  {
+    if (!serial_matlab) Serial.println((String)"Setting speed, delay requested: "+delay_micros);
+    setDelay(delay_micros);
+  }
+  else if (delay_micros > 0)
+  {
+    delay_micros = DELAY_MIN;
+    if (!serial_matlab) Serial.println((String)"Setting speed to minimum delay: "+delay_micros);
+    setDelay(delay_micros);
+  }
+  else
+  {
+    if (!serial_matlab) Serial.println((String)"Invalid speed!");
+  }
 }
 
 void frame::setSpeedInt(uint8_t speed_int)
@@ -179,6 +208,8 @@ void frame::setSpeedInt(uint8_t speed_int)
   float speed_new;
   switch (speed_int)
   {
+    case 0:
+      speed_new = 0;
     case 1:
       speed_new = SPEED_1;
       break;
@@ -207,9 +238,14 @@ uint8_t frame::getSteppers()
   return _step_active;
 }
 
-uint16_t frame::getDelay()
+uint32_t frame::getDelay()
 {
   return _step_delay;
+}
+
+float frame::getSpeed()
+{
+  return _speed;
 }
 
 bool frame::getDir()
@@ -274,7 +310,7 @@ void input::read()
     if (_state == false)
     {
       _justPressed = true;
-      // Serial.println("ON");
+      //if (!serial_matlab) Serial.println("Input pressed");
     }
     _state = true;
   }
@@ -283,7 +319,7 @@ void input::read()
     if (_state == true)
     {
       _justReleased = true;
-      // Serial.println("OFF");
+      //if (!serial_matlab) Serial.println("Input released");
     }
     _state = false;
   }
